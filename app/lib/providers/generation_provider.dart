@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../services/api_service.dart';
 import '../services/notification_service.dart';
+import '../utils/media_file_types.dart';
 
 enum GenerationStatus { idle, ready, processing, completed, failed }
 
@@ -82,7 +83,7 @@ class GenerationProvider extends ChangeNotifier {
       _updateProgress(0.15, '上传素材中...', runId: runId);
 
       String resultPath;
-      if (_isVideoPath(_videoPath!)) {
+      if (isVideoFilePath(_videoPath!)) {
         final jobId = await _api.swapVideoJob(
           sourcePath: _faceImagePath!,
           targetPath: _videoPath!,
@@ -94,7 +95,9 @@ class GenerationProvider extends ChangeNotifier {
           onProgress: (downloadProgress) {
             _updateProgress(
               0.3 + downloadProgress * 0.65,
-              _isAppInBackground ? '后台网络暂时不可用，继续等待服务器完成...' : '服务器处理中，保持前台可查看进度...',
+              _isAppInBackground
+                  ? '后台网络暂时不可用，继续等待服务器完成...'
+                  : '服务器处理中，保持前台可查看进度...',
               runId: runId,
             );
           },
@@ -156,14 +159,6 @@ class GenerationProvider extends ChangeNotifier {
       }
       notifyListeners();
     }
-  }
-
-  bool _isVideoPath(String path) {
-    final lower = path.toLowerCase();
-    return lower.endsWith('.mp4') ||
-        lower.endsWith('.mov') ||
-        lower.endsWith('.avi') ||
-        lower.endsWith('.mkv');
   }
 
   void _updateProgress(double value, String step, {int? runId}) {

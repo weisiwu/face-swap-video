@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 
+import '../utils/media_file_types.dart';
+
 class ApiService {
   // Cloudflare Tunnel URL — auto-synced from server
   // The LaunchAgent writes this file; App reads it at startup
@@ -41,7 +43,7 @@ class ApiService {
     required String targetPath,
     void Function(double progress)? onProgress,
   }) async {
-    final isVideo = _isVideoFile(targetPath);
+    final isVideo = isVideoFilePath(targetPath);
     if (isVideo) {
       final jobId = await swapVideoJob(
         sourcePath: sourcePath,
@@ -218,14 +220,6 @@ class ApiService {
         error.toString().contains('SocketException') ||
         error.toString().contains('Failed host lookup') ||
         error.toString().contains('failed host lookup');
-  }
-
-  bool _isVideoFile(String path) {
-    final ext = path.toLowerCase();
-    return ext.endsWith('.mp4') ||
-        ext.endsWith('.mov') ||
-        ext.endsWith('.avi') ||
-        ext.endsWith('.mkv');
   }
 }
 
