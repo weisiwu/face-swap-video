@@ -1,9 +1,10 @@
 import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 /// 照片网格选择器
-/// 直接获取设备相册权限，以 3 列网格展示照片，单选一张后返回路径
+/// 直接获取设备相册权限，以 3 列网格展示照片，支持切换相册/文件夹，单选一张后返回路径
 class PhotoGridScreen extends StatefulWidget {
   const PhotoGridScreen({super.key});
 
@@ -12,6 +13,8 @@ class PhotoGridScreen extends StatefulWidget {
 }
 
 class _PhotoGridScreenState extends State<PhotoGridScreen> {
+  List<AssetPathEntity> _albums = [];
+  AssetPathEntity? _selectedAlbum;
   List<AssetEntity> _photos = [];
   bool _loading = true;
   bool _hasPermission = false;
@@ -33,7 +36,7 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
         _hasPermission = true;
         _permissionError = null;
       });
-      await _loadPhotos();
+      await _loadAlbumsAndPhotos();
     } else {
       setState(() {
         _hasPermission = false;
@@ -45,29 +48,49 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
     }
   }
 
-  Future<void> _loadPhotos() async {
-    // 获取最近相册
+  Future<void> _loadAlbumsAndPhotos() async {
+    setState(() => _loading = true);
+
     final albums = await PhotoManager.getAssetPathList(
       type: RequestType.image,
-      onlyAll: true,
+      onlyAll: false,
     );
 
-    if (albums.isEmpty) {
+    if (!mounted) return;
+
+    _albums = albums;
+    if (_selectedAlbum == null && albums.isNotEmpty) {
+      _selectedAlbum = albums.first;
+    } else if (_selectedAlbum != null) {
+      _selectedAlbum = _findAlbumById(albums, _selectedAlbum!.id);
+      _selectedAlbum ??= albums.isNotEmpty ? albums.first : null;
+    }
+
+    await _loadPhotosFromSelectedAlbum();
+  }
+
+  AssetPathEntity? _findAlbumById(List<AssetPathEntity> albums, String id) {
+    for (final album in albums) {
+      if (album.id == id) return album;
+    }
+    return null;
+  }
+
+  Future<void> _loadPhotosFromSelectedAlbum() async {
+    final album = _selectedAlbum;
+    if (album == null) {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _photos = [];
+          _loading = false;
+        });
       }
       return;
     }
 
-    // 加载最近 200 张照片
-    final album = albums.first;
     final count = await album.assetCountAsync;
-    final loadCount = count > 200 ? 200 : count;
-
-    final assets = await album.getAssetListRange(
-      start: 0,
-      end: loadCount,
-    );
+    final loadCount = count > 300 ? 300 : count;
+    final assets = await album.getAssetListRange(start: 0, end: loadCount);
 
     if (mounted) {
       setState(() {
@@ -77,11 +100,143 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
     }
   }
 
+  Future<void> _selectAlbum(AssetPathEntity album) async {
+    if (_selectedAlbum?.id == album.id) return;
+
+    setState(() {
+      _selectedAlbum = album;
+      _photos = [];
+      _loading = true;
+    });
+    await _loadPhotosFromSelectedAlbum();
+  }
+
+  Future<void> _showAlbumPicker() async {
+    if (_albums.isEmpty) return;
+
+    final selected = await showModalBottomSheet<AssetPathEntity>(
+      context: context,
+      backgroundColor: const Color(0xFF15111F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 42,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 10, 20, 14),
+                child: Row(
+                  children: [
+                    Icon(Icons.folder_rounded, color: Color(0xFFEC4899)),
+                    SizedBox(width: 10),
+                    Text(
+                      '切换照片文件夹',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _albums.length,
+                  separatorBuilder: (context, index) => Divider(
+                    height: 1,
+                    color: Colors.white.withValues(alpha: 0.06),
+                  ),
+                  itemBuilder: (context, index) {
+                    final album = _albums[index];
+                    final isSelected = album.id == _selectedAlbum?.id;
+                    return FutureBuilder<int>(
+                      future: album.assetCountAsync,
+                      builder: (context, snapshot) {
+                        final count = snapshot.data;
+                        return ListTile(
+                          leading: Icon(
+                            isSelected
+                                ? Icons.check_circle_rounded
+                                : Icons.folder_outlined,
+                            color: isSelected
+                                ? const Color(0xFFEC4899)
+                                : Colors.white.withValues(alpha: 0.55),
+                          ),
+                          title: Text(
+                            _albumDisplayName(album),
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: count == null
+                              ? null
+                              : Text(
+                                  '$count 张照片',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.4),
+                                  ),
+                                ),
+                          onTap: () => Navigator.of(context).pop(album),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected != null) {
+      await _selectAlbum(selected);
+    }
+  }
+
+  String _albumDisplayName(AssetPathEntity album) {
+    final name = album.name.trim();
+    if (name.isEmpty || name.toLowerCase() == 'recent') {
+      return '最近项目';
+    }
+    if (name.toLowerCase() == 'download') {
+      return '下载 / Download';
+    }
+    return name;
+  }
+
   Future<void> _onPhotoTap(AssetEntity asset) async {
     // 获取原文件路径
     final file = await asset.file;
     if (file != null && mounted) {
       Navigator.of(context).pop(file.path);
+    }
+  }
+
+  Future<void> _pickPhotoFromFileManager() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    final path = result?.files.single.path;
+    if (path != null && path.isNotEmpty && mounted) {
+      Navigator.of(context).pop(path);
     }
   }
 
@@ -93,19 +248,15 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0F0A1A),
-              Color(0xFF1A0F2E),
-              Color(0xFF0D1117),
-            ],
+            colors: [Color(0xFF0F0A1A), Color(0xFF1A0F2E), Color(0xFF0D1117)],
           ),
         ),
         child: SafeArea(
           child: Column(
             children: [
-              // 顶栏
               _buildTopBar(),
-              // 内容区
+              _buildFileManagerButton(),
+              _buildAlbumBar(),
               Expanded(child: _buildBody()),
             ],
           ),
@@ -147,12 +298,114 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
     );
   }
 
+  Widget _buildFileManagerButton() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: GestureDetector(
+        onTap: _pickPhotoFromFileManager,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEC4899).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: const Color(0xFFEC4899).withValues(alpha: 0.28),
+            ),
+          ),
+          child: const Row(
+            children: [
+              Icon(
+                Icons.folder_open_rounded,
+                size: 20,
+                color: Color(0xFFF472B6),
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '从文件管理选择照片',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 16,
+                color: Color(0xFFF472B6),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAlbumBar() {
+    if (!_hasPermission || _albums.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final selectedName = _selectedAlbum == null
+        ? '选择文件夹'
+        : _albumDisplayName(_selectedAlbum!);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: GestureDetector(
+        onTap: _showAlbumPicker,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.folder_rounded,
+                size: 20,
+                color: Color(0xFFEC4899),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  selectedName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                '切换',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.45),
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: Colors.white.withValues(alpha: 0.45),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildBody() {
     if (_loading) {
       return const Center(
-        child: CircularProgressIndicator(
-          color: Color(0xFFEC4899),
-        ),
+        child: CircularProgressIndicator(color: Color(0xFFEC4899)),
       );
     }
 
@@ -163,7 +416,7 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
     if (_photos.isEmpty) {
       return Center(
         child: Text(
-          '没有找到照片',
+          '当前文件夹没有照片',
           style: TextStyle(
             fontSize: 15,
             color: Colors.white.withValues(alpha: 0.4),
@@ -203,9 +456,7 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
               height: double.infinity,
             );
           }
-          return Container(
-            color: Colors.white.withValues(alpha: 0.03),
-          );
+          return Container(color: Colors.white.withValues(alpha: 0.03));
         },
       ),
     );
@@ -246,8 +497,10 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
             GestureDetector(
               onTap: _requestAndLoad,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 14,
+                ),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
                     colors: [Color(0xFFEC4899), Color(0xFFF472B6)],
