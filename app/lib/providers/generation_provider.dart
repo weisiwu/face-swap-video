@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../services/api_service.dart';
 import '../services/notification_service.dart';
 import '../utils/media_file_types.dart';
+import '../utils/selected_file_name.dart';
 
 enum GenerationStatus { idle, ready, processing, completed, failed }
 
@@ -35,8 +36,8 @@ class GenerationProvider extends ChangeNotifier {
   bool get canSubmit =>
       _hasRequiredInputs && _status != GenerationStatus.processing;
 
-  String get videoFileName => _videoPath?.split('/').last ?? '未选择';
-  String get faceImageFileName => _faceImagePath?.split('/').last ?? '未选择';
+  String get videoFileName => selectedFileName(_videoPath);
+  String get faceImageFileName => selectedFileName(_faceImagePath);
 
   bool get _hasRequiredInputs => _videoPath != null && _faceImagePath != null;
   GenerationStatus get _inputAwareIdleStatus =>
