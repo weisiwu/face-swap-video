@@ -4,6 +4,7 @@ import 'providers/generation_provider.dart';
 import 'screens/generation_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/notification_service.dart';
+import 'utils/app_lifecycle_background.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,12 +42,7 @@ class _FaceSwapAppState extends State<FaceSwapApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    final isBackground = switch (state) {
-      AppLifecycleState.paused ||
-      AppLifecycleState.detached ||
-      AppLifecycleState.hidden => true,
-      AppLifecycleState.resumed || AppLifecycleState.inactive => false,
-    };
+    final isBackground = isBackgroundLifecycleState(state);
     context.read<GenerationProvider>().setAppLifecycleInBackground(
       isBackground,
     );
