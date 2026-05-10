@@ -1,0 +1,45 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# ── FaceFusion server caches & outputs ──
+server/.caches/
+server/.jobs/
+server/.api_output/
+server/.assets/
+
+# ── Flutter / Dart ──
+app/.dart_tool/
+app/.packages
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/android/.gradle/
+app/android/local.properties
+app/ios/Pods/
+app/ios/.symlinks/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Test media (large files) ──
+test_media/
+
+# ── Logs ──
+*.log
+
+# ── Env / secrets ──
+.env
+*.env.local

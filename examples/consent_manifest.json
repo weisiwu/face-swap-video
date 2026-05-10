@@ -1,0 +1,19 @@
+{
+  "project": "demo",
+  "operator": "weisiwu",
+  "source_faces": [
+    {
+      "path": "assets/source/person_a.jpg",
+      "subject": "person_a",
+      "consent_type": "explicit",
+      "allowed_use": ["face_swap_test", "internal_preview"],
+      "expires_at": "2026-12-31"
+    }
+  ],
+  "target_videos": [
+    {
+      "path": "assets/input/video.mp4",
+      "allowed_use": ["face_swap_test", "internal_preview"]
+    }
+  ]
+}

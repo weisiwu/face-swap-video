@@ -1,0 +1,8 @@
+{
+  "source_face": "assets/source/person_a.jpg",
+  "target_video": "assets/input/video.mp4",
+  "output_dir": "outputs/demo",
+  "consent_manifest": "consent_manifest.json",
+  "watermark_text": "AI-generated / authorized face swap",
+  "dry_run": true
+}
