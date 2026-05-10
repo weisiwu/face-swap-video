@@ -33,12 +33,14 @@ class GenerationProvider extends ChangeNotifier {
       _status == GenerationStatus.processing && _isAppInBackground;
 
   bool get canSubmit =>
-      _videoPath != null &&
-      _faceImagePath != null &&
-      _status != GenerationStatus.processing;
+      _hasRequiredInputs && _status != GenerationStatus.processing;
 
   String get videoFileName => _videoPath?.split('/').last ?? '未选择';
   String get faceImageFileName => _faceImagePath?.split('/').last ?? '未选择';
+
+  bool get _hasRequiredInputs => _videoPath != null && _faceImagePath != null;
+  GenerationStatus get _inputAwareIdleStatus =>
+      _hasRequiredInputs ? GenerationStatus.ready : GenerationStatus.idle;
 
   void setVideoPath(String path) {
     _videoPath = path;
@@ -53,7 +55,7 @@ class GenerationProvider extends ChangeNotifier {
   }
 
   void _updateReadyStatus() {
-    if (_videoPath != null && _faceImagePath != null) {
+    if (_hasRequiredInputs) {
       _status = GenerationStatus.ready;
     }
   }
@@ -172,9 +174,7 @@ class GenerationProvider extends ChangeNotifier {
     if (_status != GenerationStatus.processing) return;
 
     _generationRunId++;
-    _status = _videoPath != null && _faceImagePath != null
-        ? GenerationStatus.ready
-        : GenerationStatus.idle;
+    _status = _inputAwareIdleStatus;
     _progress = 0.0;
     _errorMessage = null;
     _resultVideoPath = null;
@@ -186,9 +186,7 @@ class GenerationProvider extends ChangeNotifier {
   void dismissError() {
     if (_status != GenerationStatus.failed) return;
 
-    _status = _videoPath != null && _faceImagePath != null
-        ? GenerationStatus.ready
-        : GenerationStatus.idle;
+    _status = _inputAwareIdleStatus;
     _progress = 0.0;
     _errorMessage = null;
     _currentStep = null;
