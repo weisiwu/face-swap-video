@@ -175,11 +175,7 @@ class GenerationProvider extends ChangeNotifier {
 
     _generationRunId++;
     _status = _inputAwareIdleStatus;
-    _progress = 0.0;
-    _errorMessage = null;
-    _resultVideoPath = null;
-    _currentStep = null;
-    _hasEnteredBackgroundDuringCurrentRun = false;
+    _clearTransientResultState();
     notifyListeners();
   }
 
@@ -187,10 +183,7 @@ class GenerationProvider extends ChangeNotifier {
     if (_status != GenerationStatus.failed) return;
 
     _status = _inputAwareIdleStatus;
-    _progress = 0.0;
-    _errorMessage = null;
-    _currentStep = null;
-    _hasEnteredBackgroundDuringCurrentRun = false;
+    _clearTransientResultState();
     notifyListeners();
   }
 
@@ -198,11 +191,15 @@ class GenerationProvider extends ChangeNotifier {
     _videoPath = null;
     _faceImagePath = null;
     _status = GenerationStatus.idle;
+    _clearTransientResultState();
+    notifyListeners();
+  }
+
+  void _clearTransientResultState() {
     _progress = 0.0;
     _errorMessage = null;
     _resultVideoPath = null;
     _currentStep = null;
     _hasEnteredBackgroundDuringCurrentRun = false;
-    notifyListeners();
   }
 }
