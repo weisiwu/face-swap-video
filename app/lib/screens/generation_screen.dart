@@ -12,7 +12,7 @@ import '../providers/generation_provider.dart';
 import 'photo_grid_screen.dart';
 import 'video_grid_screen.dart';
 
-const String _appVersion = '1.3.2';
+const String _appVersion = '1.4.0';
 
 class GenerationScreen extends StatefulWidget {
   const GenerationScreen({super.key});
@@ -648,6 +648,8 @@ class _GenerationScreenState extends State<GenerationScreen> {
                     child: Column(
                       children: [
                         _buildHeader(),
+                        const SizedBox(height: 10),
+                        _buildAppTitle(),
                         const SizedBox(height: 14),
                         _buildWorkflowChips(),
                         const SizedBox(height: 18),
@@ -684,6 +686,19 @@ class _GenerationScreenState extends State<GenerationScreen> {
 
   Widget _buildHeader() {
     return const Center(child: _HomeFaceSwapLogo(size: 92));
+  }
+
+  Widget _buildAppTitle() {
+    return const Text(
+      '视频换脸',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: 24,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.6,
+      ),
+    );
   }
 
   Widget _buildWorkflowChips() {
