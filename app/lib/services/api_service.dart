@@ -9,6 +9,17 @@ class ApiService {
   // Cloudflare Tunnel URL — auto-synced from server
   // The LaunchAgent writes this file; App reads it at startup
   static const String _defaultUrl = 'https://facefusion.baoganai.com';
+  static const String _healthEndpoint = '/api/health';
+  static const String _imageSwapEndpoint = '/api/swap/image';
+  static const String _videoJobEndpoint = '/api/swap/video/job';
+  static const String _videoStatusEndpointPrefix = '/api/swap/status';
+  static const String _videoResultEndpointPrefix = '/api/swap/result';
+  static const Duration _healthTimeout = Duration(seconds: 10);
+  static const Duration _uploadTimeout = Duration(minutes: 5);
+  static const Duration _downloadTimeout = Duration(minutes: 5);
+  static const Duration _pollInterval = Duration(seconds: 4);
+  static const Duration _pollTimeout = Duration(minutes: 35);
+  static const Duration _statusRequestTimeout = Duration(seconds: 15);
 
   String _baseUrl;
 
@@ -25,8 +36,8 @@ class ApiService {
   Future<bool> healthCheck() async {
     try {
       final response = await http
-          .get(Uri.parse('$_baseUrl/api/health'))
-          .timeout(const Duration(seconds: 10));
+          .get(Uri.parse('$_baseUrl$_healthEndpoint'))
+          .timeout(_healthTimeout);
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -51,19 +62,15 @@ class ApiService {
       );
       return pollSwapJob(jobId: jobId, onProgress: onProgress);
     }
-    const endpoint = '/api/swap/image';
-
     final request = http.MultipartRequest(
       'POST',
-      Uri.parse('$_baseUrl$endpoint'),
+      Uri.parse('$_baseUrl$_imageSwapEndpoint'),
     );
 
     request.files.add(await http.MultipartFile.fromPath('source', sourcePath));
     request.files.add(await http.MultipartFile.fromPath('target', targetPath));
 
-    final streamedResponse = await request.send().timeout(
-      const Duration(minutes: 5),
-    );
+    final streamedResponse = await request.send().timeout(_uploadTimeout);
 
     if (streamedResponse.statusCode != 200) {
       final body = await streamedResponse.stream.bytesToString();
@@ -100,14 +107,12 @@ class ApiService {
   }) async {
     final request = http.MultipartRequest(
       'POST',
-      Uri.parse('$_baseUrl/api/swap/video/job'),
+      Uri.parse('$_baseUrl$_videoJobEndpoint'),
     );
     request.files.add(await http.MultipartFile.fromPath('source', sourcePath));
     request.files.add(await http.MultipartFile.fromPath('target', targetPath));
 
-    final streamedResponse = await request.send().timeout(
-      const Duration(minutes: 5),
-    );
+    final streamedResponse = await request.send().timeout(_uploadTimeout);
     final body = await streamedResponse.stream.bytesToString();
     if (streamedResponse.statusCode != 200) {
       throw ApiException(
@@ -128,23 +133,22 @@ class ApiService {
     required String jobId,
     void Function(double progress)? onProgress,
   }) async {
-    const pollInterval = Duration(seconds: 4);
     final startedAt = DateTime.now();
 
     var transientNetworkFailures = 0;
 
-    while (DateTime.now().difference(startedAt) < const Duration(minutes: 35)) {
+    while (DateTime.now().difference(startedAt) < _pollTimeout) {
       http.Response statusResponse;
       try {
         statusResponse = await http
-            .get(Uri.parse('$_baseUrl/api/swap/status/$jobId'))
-            .timeout(const Duration(seconds: 15));
+            .get(Uri.parse('$_baseUrl$_videoStatusEndpointPrefix/$jobId'))
+            .timeout(_statusRequestTimeout);
         transientNetworkFailures = 0;
       } catch (e) {
         if (_isTransientNetworkError(e) && transientNetworkFailures < 90) {
           transientNetworkFailures++;
           onProgress?.call(0.35);
-          await Future<void>.delayed(pollInterval);
+          await Future<void>.delayed(_pollInterval);
           continue;
         }
         throw ApiException(0, '网络连接暂时不可用，请稍后重试');
@@ -170,7 +174,7 @@ class ApiService {
       }
 
       onProgress?.call(0.35);
-      await Future<void>.delayed(pollInterval);
+      await Future<void>.delayed(_pollInterval);
     }
 
     throw ApiException(408, '视频处理超时，请稍后重试');
@@ -182,11 +186,9 @@ class ApiService {
   }) async {
     final request = http.Request(
       'GET',
-      Uri.parse('$_baseUrl/api/swap/result/$jobId'),
+      Uri.parse('$_baseUrl$_videoResultEndpointPrefix/$jobId'),
     );
-    final streamedResponse = await request.send().timeout(
-      const Duration(minutes: 5),
-    );
+    final streamedResponse = await request.send().timeout(_downloadTimeout);
     if (streamedResponse.statusCode != 200) {
       final body = await streamedResponse.stream.bytesToString();
       throw ApiException(
