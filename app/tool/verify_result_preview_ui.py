@@ -25,7 +25,8 @@ checks = [
     ('bottom save button text', "label: Text(_savingResult ? '保存中...' : '保存到相册')" in generation),
     ('main preview button normal size', 'height: 44' in generation[generation.index('Widget _buildResultButton'):] and 'fontSize: 14' in generation[generation.index('Widget _buildResultButton'):]),
     ('dialog save button normal size', 'height: 40' in generation[generation.index('Future<void> _showCompletionDialog'):] and 'fontSize: 14' in generation[generation.index('Future<void> _showCompletionDialog'):generation.index('Future<void> _saveResultVideo')]),
-    ('play overlay button compact', 'width: 34' in generation[generation.index('class _ResultVideoPreview'):] and 'size: 22' in generation[generation.index('class _ResultVideoPreview'):] and 'width: 42' not in generation[generation.index('class _ResultVideoPreview'):]),
+    ('play overlay button compact', 'width: 26' in generation[generation.index('class _ResultVideoPreview'):] and 'height: 26' in generation[generation.index('class _ResultVideoPreview'):] and 'size: 22' in generation[generation.index('class _ResultVideoPreview'):] and 'width: 34' not in generation[generation.index('class _ResultVideoPreview'):]),
+    ('preview plays once only', 'await _controller.setLooping(false);' in generation and '_handlePreviewCompleted' in generation and '_controller.pause();' in generation[generation.index('void _handlePreviewCompleted'):]),
 ]
 
 failed = [name for name, ok in checks if not ok]

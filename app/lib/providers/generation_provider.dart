@@ -94,7 +94,7 @@ class GenerationProvider extends ChangeNotifier {
           onProgress: (downloadProgress) {
             _updateProgress(
               0.3 + downloadProgress * 0.65,
-              _isAppInBackground ? '后台转换中，完成后会通知你...' : '服务器处理中，保持前台可查看进度...',
+              _isAppInBackground ? '后台网络暂时不可用，继续等待服务器完成...' : '服务器处理中，保持前台可查看进度...',
               runId: runId,
             );
           },
@@ -132,7 +132,7 @@ class GenerationProvider extends ChangeNotifier {
     } catch (e) {
       if (!_isActiveRun(runId)) return;
       _status = GenerationStatus.failed;
-      _errorMessage = '网络错误: ${e.toString()}';
+      _errorMessage = '网络连接暂时不可用，请稍后重试';
       if (_isAppInBackground) {
         unawaited(NotificationService.showGenerationFailed(_errorMessage!));
       }

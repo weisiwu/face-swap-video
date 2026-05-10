@@ -3,14 +3,16 @@ import 'package:provider/provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_player/video_player.dart';
+import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 import '../providers/generation_provider.dart';
 import 'photo_grid_screen.dart';
 import 'video_grid_screen.dart';
 
-const String _appVersion = '1.0.0';
+const String _appVersion = '1.3.2';
 
 class GenerationScreen extends StatefulWidget {
   const GenerationScreen({super.key});
@@ -20,6 +22,9 @@ class GenerationScreen extends StatefulWidget {
 }
 
 class _GenerationScreenState extends State<GenerationScreen> {
+  static const double _homeLogoSize = 92;
+  static const double _targetFaceTopPhysicalPx = 253;
+
   GenerationProvider? _provider;
   bool _errorDialogVisible = false;
   bool _processingDialogVisible = false;
@@ -623,6 +628,7 @@ class _GenerationScreenState extends State<GenerationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final logoTopInset = _targetLogoTopInset(context);
     return Scaffold(
       backgroundColor: const Color(0xFF050510),
       body: Stack(
@@ -632,16 +638,17 @@ class _GenerationScreenState extends State<GenerationScreen> {
           ),
           Positioned.fill(
             child: SafeArea(
-              child: Center(
+              child: Align(
+                alignment: Alignment.topCenter,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 500),
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
+                    padding: EdgeInsets.fromLTRB(20, logoTopInset, 20, 28),
                     child: Column(
                       children: [
                         _buildHeader(),
-                        const SizedBox(height: 22),
+                        const SizedBox(height: 14),
                         _buildWorkflowChips(),
                         const SizedBox(height: 18),
                         _buildVideoCard(),
@@ -665,65 +672,18 @@ class _GenerationScreenState extends State<GenerationScreen> {
     );
   }
 
+  double _targetLogoTopInset(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final faceTopInsideLogo = _homeLogoSize * (0.5 - 0.19 * 0.91);
+    final top =
+        (_targetFaceTopPhysicalPx / media.devicePixelRatio) -
+        media.padding.top -
+        faceTopInsideLogo;
+    return top.clamp(0.0, 96.0);
+  }
+
   Widget _buildHeader() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(30),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFFF7ACD).withValues(alpha: 0.16),
-                blurRadius: 32,
-                offset: const Offset(0, 16),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              const _FaceSwapHeroMark(),
-              const SizedBox(height: 18),
-              ShaderMask(
-                shaderCallback: (bounds) => const LinearGradient(
-                  colors: [
-                    Color(0xFFFFFFFF),
-                    Color(0xFFFF7ACD),
-                    Color(0xFF72F2FF),
-                  ],
-                ).createShader(bounds),
-                child: const Text(
-                  '视频换脸',
-                  style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.white,
-                    letterSpacing: -1.2,
-                    height: 1,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '极简动漫风 · 快速生成 · 前台实时进度',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white.withValues(alpha: 0.62),
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    return const Center(child: _HomeFaceSwapLogo(size: 92));
   }
 
   Widget _buildWorkflowChips() {
@@ -1265,140 +1225,169 @@ class _GenerationScreenState extends State<GenerationScreen> {
   }
 }
 
-class _FaceSwapHeroMark extends StatelessWidget {
-  const _FaceSwapHeroMark();
+class _HomeFaceSwapLogo extends StatelessWidget {
+  const _HomeFaceSwapLogo({required this.size});
+
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 178,
-      height: 82,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned(
-            left: 0,
-            child: _AnimeFaceAvatar(
-              accent: const Color(0xFFFF7ACD),
-              hair: const Color(0xFFFF7ACD).withValues(alpha: 0.88),
-            ),
-          ),
-          Positioned(
-            right: 0,
-            child: _AnimeFaceAvatar(
-              accent: const Color(0xFF72F2FF),
-              hair: const Color(0xFF72F2FF).withValues(alpha: 0.88),
-            ),
-          ),
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                colors: [
-                  Color(0xFFFF7ACD),
-                  Color(0xFF8B5CF6),
-                  Color(0xFF72F2FF),
-                ],
-              ),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF72F2FF).withValues(alpha: 0.25),
-                  blurRadius: 22,
-                ),
-              ],
-            ),
-            child: const Icon(
-              Icons.swap_horiz_rounded,
-              color: Colors.white,
-              size: 30,
-            ),
-          ),
-        ],
-      ),
+      width: size,
+      height: size,
+      child: const CustomPaint(painter: _HomeFaceSwapLogoPainter()),
     );
   }
 }
 
-class _AnimeFaceAvatar extends StatelessWidget {
-  const _AnimeFaceAvatar({required this.accent, required this.hair});
-
-  final Color accent;
-  final Color hair;
+class _HomeFaceSwapLogoPainter extends CustomPainter {
+  const _HomeFaceSwapLogoPainter();
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 72,
-      height: 72,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: const Color(0xFFFFF6F8),
-        border: Border.all(color: accent.withValues(alpha: 0.8), width: 2),
-        boxShadow: [
-          BoxShadow(color: accent.withValues(alpha: 0.22), blurRadius: 20),
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final pink = const Color(0xFFFF7ACD);
+    final cyan = const Color(0xFF72F2FF);
+    final violet = const Color(0xFF8B5CF6);
+
+    final glowPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          pink.withValues(alpha: 0.32),
+          cyan.withValues(alpha: 0.12),
+          Colors.transparent,
         ],
-      ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            left: 8,
-            right: 8,
-            top: 7,
-            child: Container(
-              height: 24,
-              decoration: BoxDecoration(
-                color: hair,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(28),
-                  bottom: Radius.circular(14),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: 20,
-            top: 35,
-            child: Container(
-              width: 7,
-              height: 13,
-              decoration: BoxDecoration(
-                color: const Color(0xFF17111F),
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 20,
-            top: 35,
-            child: Container(
-              width: 7,
-              height: 13,
-              decoration: BoxDecoration(
-                color: const Color(0xFF17111F),
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-          ),
-          Positioned(
-            left: 31,
-            bottom: 15,
-            child: Container(
-              width: 10,
-              height: 4,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.42),
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-          ),
-        ],
-      ),
+      ).createShader(Offset.zero & size);
+    canvas.drawCircle(center, size.width * 0.42, glowPaint);
+
+    final orbitPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.1
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: size.width * 0.42),
+      -math.pi * 0.12,
+      math.pi * 1.25,
+      false,
+      orbitPaint..color = cyan.withValues(alpha: 0.68),
     );
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: size.width * 0.34),
+      math.pi * 1.04,
+      -math.pi * 1.18,
+      false,
+      orbitPaint..color = pink.withValues(alpha: 0.75),
+    );
+
+    final left = Offset(size.width * 0.53, size.height * 0.5);
+    final right = Offset(size.width * 0.47, size.height * 0.5);
+    _drawAnimeFace(canvas, left, size.width * 0.19, pink, 0.08);
+    _drawAnimeFace(canvas, right, size.width * 0.19, cyan, -0.08);
+
+    final sparkPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = violet.withValues(alpha: 0.78);
+    for (var i = 0; i < 6; i++) {
+      final angle = math.pi * 2 + i * math.pi / 3;
+      final r = size.width * (0.23 + 0.12 * ((i % 2) + 1) / 2);
+      final p = center + Offset(math.cos(angle), math.sin(angle)) * r;
+      canvas.drawCircle(p, 2.1, sparkPaint);
+    }
   }
+
+  void _drawAnimeFace(
+    Canvas canvas,
+    Offset c,
+    double r,
+    Color color,
+    double tilt,
+  ) {
+    canvas.save();
+    canvas.translate(c.dx, c.dy);
+    canvas.rotate(tilt);
+    final facePaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = const Color(0xFFFFF6F8);
+    final edgePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..color = color.withValues(alpha: 0.9);
+    final hairPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = color.withValues(alpha: 0.82);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: r * 1.65, height: r * 1.82),
+        Radius.circular(r * 0.72),
+      ),
+      facePaint,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: r * 1.65, height: r * 1.82),
+        Radius.circular(r * 0.72),
+      ),
+      edgePaint,
+    );
+    final hair = Path()
+      ..moveTo(-r * 0.82, -r * 0.2)
+      ..quadraticBezierTo(-r * 0.55, -r * 1.0, 0, -r * 0.9)
+      ..quadraticBezierTo(r * 0.65, -r * 0.92, r * 0.82, -r * 0.1)
+      ..quadraticBezierTo(r * 0.28, -r * 0.34, -r * 0.1, -r * 0.22)
+      ..quadraticBezierTo(-r * 0.45, -r * 0.08, -r * 0.82, -r * 0.2)
+      ..close();
+    canvas.drawPath(hair, hairPaint);
+
+    final eyePaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = const Color(0xFF17111F);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(-r * 0.28, r * 0.08),
+        width: r * 0.18,
+        height: r * 0.34,
+      ),
+      eyePaint,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(r * 0.28, r * 0.08),
+        width: r * 0.18,
+        height: r * 0.34,
+      ),
+      eyePaint,
+    );
+    canvas.drawCircle(
+      Offset(-r * 0.24, -r * 0.02),
+      r * 0.035,
+      Paint()..color = Colors.white,
+    );
+    canvas.drawCircle(
+      Offset(r * 0.32, -r * 0.02),
+      r * 0.035,
+      Paint()..color = Colors.white,
+    );
+    final mouth = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.1
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0xFF17111F).withValues(alpha: 0.55);
+    canvas.drawArc(
+      Rect.fromCenter(
+        center: Offset(0, r * 0.34),
+        width: r * 0.34,
+        height: r * 0.18,
+      ),
+      0,
+      math.pi,
+      false,
+      mouth,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _HomeFaceSwapLogoPainter oldDelegate) => false;
 }
 
 class _AnimeAuraPainter extends CustomPainter {
@@ -1470,6 +1459,7 @@ class _ResultVideoPreview extends StatefulWidget {
 class _ResultVideoPreviewState extends State<_ResultVideoPreview> {
   late final VideoPlayerController _controller;
   bool _initializing = true;
+  bool _handlingPreviewCompletion = false;
   String? _errorMessage;
 
   @override
@@ -1483,7 +1473,7 @@ class _ResultVideoPreviewState extends State<_ResultVideoPreview> {
   Future<void> _initialize() async {
     try {
       await _controller.initialize();
-      await _controller.setLooping(true);
+      await _controller.setLooping(false);
       if (mounted) {
         setState(() => _initializing = false);
       }
@@ -1498,7 +1488,26 @@ class _ResultVideoPreviewState extends State<_ResultVideoPreview> {
   }
 
   void _handleControllerChanged() {
+    _handlePreviewCompleted();
     if (mounted) setState(() {});
+  }
+
+  void _handlePreviewCompleted() {
+    final value = _controller.value;
+    if (!value.isInitialized ||
+        !value.isPlaying ||
+        value.duration == Duration.zero ||
+        _handlingPreviewCompletion) {
+      return;
+    }
+    if (value.position >= value.duration) {
+      _handlingPreviewCompletion = true;
+      unawaited(
+        _controller.pause().whenComplete(() {
+          _handlingPreviewCompletion = false;
+        }),
+      );
+    }
   }
 
   Future<void> _togglePlayback() async {
@@ -1506,6 +1515,9 @@ class _ResultVideoPreviewState extends State<_ResultVideoPreview> {
     if (_controller.value.isPlaying) {
       await _controller.pause();
     } else {
+      if (_controller.value.position >= _controller.value.duration) {
+        await _controller.seekTo(Duration.zero);
+      }
       await _controller.play();
     }
   }
@@ -1585,8 +1597,8 @@ class _ResultVideoPreviewState extends State<_ResultVideoPreview> {
               ),
               if (!isPlaying)
                 Container(
-                  width: 34,
-                  height: 34,
+                  width: 26,
+                  height: 26,
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.46),
                     shape: BoxShape.circle,

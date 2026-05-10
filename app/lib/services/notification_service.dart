@@ -25,9 +25,15 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >();
     await androidPlugin?.createNotificationChannel(_channel);
-    if (Platform.isAndroid) {
-      await androidPlugin?.requestNotificationsPermission();
-    }
+  }
+
+  static Future<void> _ensureNotificationPermission() async {
+    if (!Platform.isAndroid) return;
+    final androidPlugin = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    await androidPlugin?.requestNotificationsPermission();
   }
 
   static Future<void> showGenerationCompleted() {
@@ -46,7 +52,8 @@ class NotificationService {
     required int id,
     required String title,
     required String body,
-  }) {
+  }) async {
+    await _ensureNotificationPermission();
     return _plugin.show(
       id,
       title,

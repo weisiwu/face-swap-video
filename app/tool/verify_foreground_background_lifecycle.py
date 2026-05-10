@@ -4,6 +4,7 @@ from pathlib import Path
 app_root = Path(__file__).resolve().parents[1]
 provider = (app_root / 'lib/providers/generation_provider.dart').read_text()
 main = (app_root / 'lib/main.dart').read_text()
+api = (app_root / 'lib/services/api_service.dart').read_text()
 
 checks = [
     (
@@ -39,6 +40,18 @@ checks = [
         'if (_isAppInBackground) {' in provider
         and 'NotificationService.showGenerationCompleted' in provider
         and 'NotificationService.showGenerationFailed' in provider,
+    ),
+    (
+        'background polling tolerates transient network loss',
+        'transientNetworkFailures' in api
+        and '_isTransientNetworkError' in api
+        and '后台网络暂时不可用，继续等待服务器完成...' in provider,
+    ),
+    (
+        'raw socket/client exceptions are sanitized for users',
+        'ClientException with SocketException' not in provider
+        and '网络连接暂时不可用，请稍后重试' in provider
+        and '网络连接暂时不可用，请稍后重试' in api,
     ),
 ]
 

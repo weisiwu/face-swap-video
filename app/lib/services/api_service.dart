@@ -129,10 +129,24 @@ class ApiService {
     const pollInterval = Duration(seconds: 4);
     final startedAt = DateTime.now();
 
+    var transientNetworkFailures = 0;
+
     while (DateTime.now().difference(startedAt) < const Duration(minutes: 35)) {
-      final statusResponse = await http
-          .get(Uri.parse('$_baseUrl/api/swap/status/$jobId'))
-          .timeout(const Duration(seconds: 15));
+      http.Response statusResponse;
+      try {
+        statusResponse = await http
+            .get(Uri.parse('$_baseUrl/api/swap/status/$jobId'))
+            .timeout(const Duration(seconds: 15));
+        transientNetworkFailures = 0;
+      } catch (e) {
+        if (_isTransientNetworkError(e) && transientNetworkFailures < 90) {
+          transientNetworkFailures++;
+          onProgress?.call(0.35);
+          await Future<void>.delayed(pollInterval);
+          continue;
+        }
+        throw ApiException(0, '网络连接暂时不可用，请稍后重试');
+      }
       if (statusResponse.statusCode != 200) {
         throw ApiException(
           statusResponse.statusCode,
@@ -195,6 +209,15 @@ class ApiService {
     }
     await sink.close();
     return outputPath;
+  }
+
+  bool _isTransientNetworkError(Object error) {
+    return error is TimeoutException ||
+        error is SocketException ||
+        error is http.ClientException ||
+        error.toString().contains('SocketException') ||
+        error.toString().contains('Failed host lookup') ||
+        error.toString().contains('failed host lookup');
   }
 
   bool _isVideoFile(String path) {

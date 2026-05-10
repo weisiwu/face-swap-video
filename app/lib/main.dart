@@ -65,14 +65,30 @@ class _FaceSwapAppState extends State<FaceSwapApp> with WidgetsBindingObserver {
         useMaterial3: true,
         fontFamily: 'System',
       ),
-      home: _showSplash
-          ? AnimeFaceSwapSplashScreen(
-              onFinished: () {
-                if (!mounted) return;
-                setState(() => _showSplash = false);
-              },
-            )
-          : const GenerationScreen(),
+      home: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 620),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: _buildHomeTransition,
+        child: _showSplash
+            ? AnimeFaceSwapSplashScreen(
+                key: const ValueKey('splash'),
+                onFinished: () {
+                  if (!mounted) return;
+                  setState(() => _showSplash = false);
+                },
+              )
+            : const GenerationScreen(key: ValueKey('generation')),
+      ),
     );
+  }
+
+  Widget _buildHomeTransition(Widget child, Animation<double> animation) {
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return FadeTransition(opacity: curved, child: child);
   }
 }
