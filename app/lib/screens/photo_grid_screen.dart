@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
+import '../utils/album_display_name.dart';
 
 /// 照片网格选择器
 /// 直接获取设备相册权限，以 3 列网格展示照片，支持切换相册/文件夹，单选一张后返回路径
@@ -176,7 +177,7 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
                                 : Colors.white.withValues(alpha: 0.55),
                           ),
                           title: Text(
-                            _albumDisplayName(album),
+                            displayAlbumName(album.name),
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: isSelected
@@ -208,17 +209,6 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
     if (selected != null) {
       await _selectAlbum(selected);
     }
-  }
-
-  String _albumDisplayName(AssetPathEntity album) {
-    final name = album.name.trim();
-    if (name.isEmpty || name.toLowerCase() == 'recent') {
-      return '最近项目';
-    }
-    if (name.toLowerCase() == 'download') {
-      return '下载 / Download';
-    }
-    return name;
   }
 
   Future<void> _onPhotoTap(AssetEntity asset) async {
@@ -350,7 +340,7 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
 
     final selectedName = _selectedAlbum == null
         ? '选择文件夹'
-        : _albumDisplayName(_selectedAlbum!);
+        : displayAlbumName(_selectedAlbum!.name);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),

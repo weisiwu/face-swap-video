@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
+import '../utils/album_display_name.dart';
 
 /// 视频网格选择器
 /// 与 PhotoGridScreen 同架构，筛选视频、支持切换相册/文件夹、3 列网格、单选返回路径
@@ -176,7 +177,10 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
                                 : Colors.white.withValues(alpha: 0.55),
                           ),
                           title: Text(
-                            _albumDisplayName(album),
+                            displayAlbumName(
+                              album.name,
+                              includeVideoFolders: true,
+                            ),
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: isSelected
@@ -208,20 +212,6 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
     if (selected != null) {
       await _selectAlbum(selected);
     }
-  }
-
-  String _albumDisplayName(AssetPathEntity album) {
-    final name = album.name.trim();
-    if (name.isEmpty || name.toLowerCase() == 'recent') {
-      return '最近项目';
-    }
-    if (name.toLowerCase() == 'download') {
-      return '下载 / Download';
-    }
-    if (name.toLowerCase() == 'movies') {
-      return '视频 / Movies';
-    }
-    return name;
   }
 
   Future<void> _onVideoTap(AssetEntity asset) async {
@@ -365,7 +355,7 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
 
     final selectedName = _selectedAlbum == null
         ? '选择文件夹'
-        : _albumDisplayName(_selectedAlbum!);
+        : displayAlbumName(_selectedAlbum!.name, includeVideoFolders: true);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
