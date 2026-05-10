@@ -55,7 +55,7 @@ apps/face-swap-video/
 │   │   ├── providers/           # 生成任务状态、进度与前后台生命周期状态
 │   │   ├── screens/             # 启动页、生成页、素材网格页
 │   │   ├── services/            # 远端 API 与本地通知服务
-│   │   └── utils/               # 纯工具函数：媒体类型、相册名称、生命周期判定
+│   │   └── utils/               # 纯工具函数：媒体类型、相册名称、生命周期判定、文件名展示
 │   ├── test/                    # Flutter/Dart 测试
 │   └── android/app/build.gradle.kts  (minSdk = 29)
 ├── scripts/                 # 工具脚本（在项目根 scripts/）

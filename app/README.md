@@ -31,7 +31,7 @@ lib/
 ├── providers/                   # 生成任务状态与前后台生命周期状态
 ├── screens/                     # 启动页、生成页、素材网格页
 ├── services/                    # 远端 API 与本地通知服务
-└── utils/                       # 纯工具函数，例如媒体文件类型判断
+└── utils/                       # 纯工具函数：媒体类型、相册名称、生命周期、文件名展示
 test/                            # Flutter/Dart 测试
 android/app/build.gradle.kts      # Android 包名、SDK 与构建配置
 ```
