@@ -30,8 +30,8 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Keep debug signing for local release smoke tests until a product
+            // release signing plan is explicitly provided.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
