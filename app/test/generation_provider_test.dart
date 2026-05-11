@@ -1,6 +1,57 @@
 import 'package:face_swap_video/features/generation/providers/generation_provider.dart';
 import 'package:face_swap_video/features/generation/services/api_service.dart';
+import 'package:face_swap_video/features/generation/services/video_upload_optimizer.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+class _CapturingApiService extends ApiService {
+  String? capturedVideoTargetPath;
+
+  @override
+  Future<bool> healthCheck() async => true;
+
+  @override
+  Future<String> swapVideoJob({
+    required String sourcePath,
+    required String targetPath,
+    UploadProgressCallback? onUploadProgress,
+  }) async {
+    capturedVideoTargetPath = targetPath;
+    onUploadProgress?.call(100, 100);
+    return 'job-optimized';
+  }
+
+  @override
+  Future<String> pollSwapJob({
+    required String jobId,
+    void Function(double progress)? onProgress,
+  }) async {
+    onProgress?.call(1);
+    return '/tmp/result.mp4';
+  }
+}
+
+class _FakeVideoUploadOptimizer implements VideoUploadOptimizer {
+  _FakeVideoUploadOptimizer(this.optimizedPath);
+
+  final String optimizedPath;
+  String? inputPath;
+  bool cancelCalled = false;
+
+  @override
+  Future<String> optimizeForUpload(
+    String targetPath, {
+    VideoCompressionProgressCallback? onProgress,
+  }) async {
+    inputPath = targetPath;
+    onProgress?.call(1);
+    return optimizedPath;
+  }
+
+  @override
+  Future<void> cancel() async {
+    cancelCalled = true;
+  }
+}
 
 class _LateUploadProgressApiService extends ApiService {
   UploadProgressCallback? _uploadProgress;
@@ -86,10 +137,31 @@ void main() {
     });
 
     test(
+      'uses optimized video path for upload when optimizer returns one',
+      () async {
+        final api = _CapturingApiService();
+        final optimizer = _FakeVideoUploadOptimizer('/tmp/optimized.mp4');
+        final provider =
+            GenerationProvider(api: api, videoUploadOptimizer: optimizer)
+              ..setVideoPath('/tmp/source.mp4')
+              ..setFaceImagePath('/tmp/face.jpg');
+
+        await provider.startGeneration();
+
+        expect(optimizer.inputPath, '/tmp/source.mp4');
+        expect(api.capturedVideoTargetPath, '/tmp/optimized.mp4');
+        expect(provider.status, GenerationStatus.completed);
+      },
+    );
+
+    test(
       'keeps progress monotonic when a late upload callback arrives',
       () async {
         final provider =
-            GenerationProvider(api: _LateUploadProgressApiService())
+            GenerationProvider(
+                api: _LateUploadProgressApiService(),
+                videoUploadOptimizer: const NoopVideoUploadOptimizer(),
+              )
               ..setVideoPath('/tmp/source.mp4')
               ..setFaceImagePath('/tmp/face.jpg');
 

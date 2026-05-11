@@ -1,6 +1,6 @@
 # face_swap_video Android App
 
-Flutter Android 客户端，用于在授权素材前提下选择源人脸与目标图片/视频，并把换脸生成任务提交到远端服务处理。移动端负责素材选择、任务提交、前台进度展示、后台等待通知与结果预览，不在本地运行重模型推理。
+Flutter Android 客户端，用于在授权素材前提下选择源人脸与目标图片/视频，并把换脸生成任务提交到远端服务处理。移动端负责素材选择、大视频上传前压缩、任务提交、前台进度展示、后台等待通知与结果预览，不在本地运行重模型推理。
 
 ## 开发与验证路径
 
@@ -27,7 +27,7 @@ lib/
 ├── core/                        # 跨功能通用服务、工具、品牌组件和开屏动画
 └── features/
     ├── auth/                    # Mock 登录、登录页、手机号辅助读取
-    ├── generation/              # 生成主流程、远端 API、生成页组件
+    ├── generation/              # 上传前压缩、生成主流程、远端 API、生成页组件
     └── media/                   # 照片/视频选择页、相册工具和媒体组件
 
 test/                            # Flutter/Dart 测试
@@ -45,7 +45,7 @@ android/app/build.gradle.kts      # Android 包名、SDK 与构建配置
   ↓
 点击生成
   ├─ 未登录 → LoginScreen Mock 手机号验证码登录 → 返回生成页
-  └─ 已登录 → 提交远端 FaceFusion API
+  └─ 已登录 → 大视频上传前压缩 → 提交远端 FaceFusion API
   ↓
 前台进度 / 后台等待通知
   ↓

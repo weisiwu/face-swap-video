@@ -41,7 +41,7 @@ done
 start_tunnel() {
     echo "[$(date)] Starting named tunnel $TUNNEL_NAME -> $PUBLIC_URL" | tee -a "$LOG_DIR/launcher.log"
     echo "$PUBLIC_URL" > "$TUNNEL_URL_FILE"
-    cloudflared tunnel --config "$TUNNEL_CONFIG" run "$TUNNEL_NAME" \
+    cloudflared tunnel --protocol http2 --config "$TUNNEL_CONFIG" run "$TUNNEL_NAME" \
         > "$LOG_DIR/tunnel.log" 2>&1 &
     TUNNEL_PID=$!
 
@@ -68,6 +68,7 @@ start_tunnel() {
 
 start_tunnel || echo "[$(date)] WARNING: Named tunnel unavailable, API is local-only" | tee -a "$LOG_DIR/launcher.log"
 echo "[$(date)] Stack running. Monitoring..." | tee -a "$LOG_DIR/launcher.log"
+TUNNEL_CHECK_COUNTER=0
 
 while true; do
     if ! curl -sf http://localhost:$API_PORT/api/health > /dev/null 2>&1; then
@@ -82,6 +83,17 @@ while true; do
     if ! pgrep -f "cloudflared tunnel.*facefusion-api" > /dev/null 2>&1; then
         echo "[$(date)] Named tunnel died, restarting..." | tee -a "$LOG_DIR/launcher.log"
         start_tunnel || true
+    else
+        TUNNEL_CHECK_COUNTER=$((TUNNEL_CHECK_COUNTER + 1))
+        if [ "$TUNNEL_CHECK_COUNTER" -ge 2 ]; then
+            TUNNEL_CHECK_COUNTER=0
+            if ! curl -sf --max-time 10 "$PUBLIC_URL/api/health" > /dev/null 2>&1; then
+                echo "[$(date)] Named tunnel health check failed, restarting..." | tee -a "$LOG_DIR/launcher.log"
+                pkill -f "cloudflared tunnel.*facefusion-api" 2>/dev/null || true
+                sleep 1
+                start_tunnel || true
+            fi
+        fi
     fi
 
     sleep 30

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:face_swap_video/features/generation/services/api_service.dart';
 import 'package:face_swap_video/core/services/notification_service.dart';
+import 'package:face_swap_video/features/generation/services/video_upload_optimizer.dart';
 import 'package:face_swap_video/features/media/utils/media_file_types.dart';
 import 'package:face_swap_video/features/media/utils/selected_file_name.dart';
 import 'package:face_swap_video/features/generation/utils/transfer_progress_label.dart';
@@ -9,9 +10,15 @@ import 'package:face_swap_video/features/generation/utils/transfer_progress_labe
 enum GenerationStatus { idle, ready, processing, completed, failed }
 
 class GenerationProvider extends ChangeNotifier {
-  GenerationProvider({ApiService? api}) : _api = api ?? ApiService();
+  GenerationProvider({
+    ApiService? api,
+    VideoUploadOptimizer? videoUploadOptimizer,
+  }) : _api = api ?? ApiService(),
+       _videoUploadOptimizer =
+           videoUploadOptimizer ?? VideoCompressUploadOptimizer();
 
   final ApiService _api;
+  final VideoUploadOptimizer _videoUploadOptimizer;
 
   String? _videoPath;
   String? _faceImagePath;
@@ -88,7 +95,25 @@ class GenerationProvider extends ChangeNotifier {
         throw ApiException(0, '无法连接到换脸服务器，请检查网络');
       }
 
-      // Phase 2: Upload & swap (bulk of the work)
+      // Phase 2: shrink large target videos on-device before upload.
+      final isVideoTarget = isVideoFilePath(_videoPath!);
+      var uploadTargetPath = _videoPath!;
+      if (isVideoTarget) {
+        _updateProgress(0.08, '正在压缩视频，减少上传体积...', runId: runId);
+        uploadTargetPath = await _videoUploadOptimizer.optimizeForUpload(
+          _videoPath!,
+          onProgress: (compressionProgress) {
+            _updateProgress(
+              0.08 + compressionProgress * 0.07,
+              '正在压缩视频，减少上传体积...',
+              runId: runId,
+            );
+          },
+        );
+        if (!_isActiveRun(runId)) return;
+      }
+
+      // Phase 3: Upload & swap.
       _updateProgress(0.15, uploadMaterialBaseLabel, runId: runId);
 
       void handleUploadProgress(int sentBytes, int totalBytes) {
@@ -105,10 +130,10 @@ class GenerationProvider extends ChangeNotifier {
       }
 
       String resultPath;
-      if (isVideoFilePath(_videoPath!)) {
+      if (isVideoTarget) {
         final jobId = await _api.swapVideoJob(
           sourcePath: _faceImagePath!,
-          targetPath: _videoPath!,
+          targetPath: uploadTargetPath,
           onUploadProgress: handleUploadProgress,
         );
         if (!_isActiveRun(runId)) return;
@@ -202,6 +227,7 @@ class GenerationProvider extends ChangeNotifier {
     if (_status != GenerationStatus.processing) return;
 
     _generationRunId++;
+    unawaited(_videoUploadOptimizer.cancel());
     _status = _inputAwareIdleStatus;
     _clearTransientResultState();
     notifyListeners();

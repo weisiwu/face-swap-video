@@ -24,7 +24,7 @@
 |---|---|
 | Android App 骨架 | ✅ Flutter Android 客户端已创建 |
 | 远端 FaceFusion API | ✅ 已接入健康检查、图片同步换脸、视频任务创建/轮询/结果下载 |
-| 生成主流程 | ✅ 素材选择、上传进度、视频任务轮询、结果下载、完成弹框 |
+| 生成主流程 | ✅ 素材选择、上传前大视频压缩、上传进度、视频任务轮询、结果下载、完成弹框 |
 | 前后台处理 | ✅ 前台展示进度；仅 App 切到后台后进入后台等待/通知语义 |
 | 结果处理 | ✅ 结果预览与保存入口；分享能力待产品确认 |
 | 登录/注册 | ✅ Mock 手机号验证码登录；点击生成时才要求登录 |
@@ -43,8 +43,15 @@
 | 状态管理 | Provider |
 | Android minSdk | API 29 / Android 10 |
 | 包名 | `com.baoganai.face_swap_video` |
-| 当前版本 | `1.5.1+2015` |
+| 当前版本 | `1.6.0+2016` |
 | 远端服务 | `https://facefusion.baoganai.com` |
+
+性能优化策略：
+
+- Android 端对大视频上传前先压缩到 960×540 / 24fps，减少上行体积；
+- Cloudflare Tunnel 固定使用 HTTP/2，规避当前网络环境下 QUIC 频繁 timeout/reconnect 导致的上传抖动；
+- 服务端视频任务单 worker 串行执行，避免多个 CoreML/FaceFusion 任务并发抢资源导致变慢或失败；
+- 服务端对目标视频再做 720p / 24fps 保护性预处理，并使用 `ultrafast` 输出 preset，优先保证移动端等待时间。
 
 主要依赖：
 
@@ -53,6 +60,7 @@
 - `file_picker`：文件选择；
 - `http`：远端 API 调用；
 - `video_player` / `video_thumbnail`：结果预览与视频缩略图；
+- `video_compress`：大视频上传前压缩到移动端友好的分辨率/FPS，降低上传体积与服务端处理帧数；
 - `flutter_local_notifications`：后台完成通知；
 - `url_launcher`：用户协议/隐私政策跳转。
 
@@ -97,7 +105,7 @@ face-swap-video/
   ↓
 点击生成
   ├─ 未登录 → LoginScreen Mock 手机号验证码登录 → 返回生成页
-  └─ 已登录 → 提交远端 FaceFusion API
+  └─ 已登录 → 大视频上传前压缩 → 提交远端 FaceFusion API
   ↓
 前台进度 / 后台等待通知
   ↓

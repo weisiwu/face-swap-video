@@ -4,12 +4,14 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +22,13 @@ FF_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/
 FF_EXECUTION_PROVIDERS = os.environ.get("FF_EXECUTION_PROVIDERS", "coreml")
 FF_PROCESSORS = os.environ.get("FF_PROCESSORS", "face_swapper")
 FF_FACE_SWAPPER_MODEL = os.environ.get("FF_FACE_SWAPPER_MODEL", "inswapper_128_fp16")
+FF_EXECUTION_THREAD_COUNT = os.environ.get("FF_EXECUTION_THREAD_COUNT", "4")
+FF_OUTPUT_VIDEO_PRESET = os.environ.get("FF_OUTPUT_VIDEO_PRESET", "ultrafast")
+FF_OUTPUT_VIDEO_QUALITY = os.environ.get("FF_OUTPUT_VIDEO_QUALITY", "70")
+FF_OUTPUT_VIDEO_FPS = os.environ.get("FF_OUTPUT_VIDEO_FPS", "24")
+FF_OPTIMIZE_TARGET_VIDEO = os.environ.get("FF_OPTIMIZE_TARGET_VIDEO", "1") != "0"
+FF_TARGET_MAX_WIDTH = int(os.environ.get("FF_TARGET_MAX_WIDTH", "720"))
+FF_TARGET_FPS = int(os.environ.get("FF_TARGET_FPS", "24"))
 FFMPEG_SEARCH_PATHS = [
     os.path.expanduser("~/miniconda3/bin"),
     "/opt/miniconda3/bin",
@@ -35,6 +44,7 @@ OUTPUT_BASE = Path(os.environ.get("FF_OUTPUT_DIR", os.path.join(FF_DIR, ".api_ou
 OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+VIDEO_JOB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="facefusion-video")
 
 # ── App ─────────────────────────────────────────────────────────────────
 try:
@@ -74,14 +84,20 @@ def _run_facefusion(args: list[str], timeout: int = 600) -> tuple[int, str, str]
     return result.returncode, result.stdout, result.stderr
 
 
-def _save_upload(upload: UploadFile, prefix: str) -> Path:
-    """Save an uploaded file to a temp location, return its path."""
+def _save_upload(upload: UploadFile, prefix: str) -> tuple[Path, int, float]:
+    """Save an uploaded file to a temp location in chunks, return path/bytes/seconds."""
     suffix = Path(upload.filename or "file").suffix or ".bin"
     out = Path(tempfile.gettempdir()) / f"{prefix}_{uuid.uuid4().hex[:8]}{suffix}"
+    started_at = time.perf_counter()
+    total_bytes = 0
     with open(out, "wb") as f:
-        content = upload.file.read()
-        f.write(content)
-    return out
+        while True:
+            chunk = upload.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            f.write(chunk)
+    return out, total_bytes, time.perf_counter() - started_at
 
 
 def _make_output_path(prefix: str, ext: str) -> Path:
@@ -101,6 +117,54 @@ def _get_job(job_id: str) -> dict | None:
     with JOBS_LOCK:
         job = JOBS.get(job_id)
         return dict(job) if job else None
+
+
+
+def _preprocess_target_video(target_path: Path) -> Path:
+    """Downscale/FPS-limit large target videos before FaceFusion to reduce frame work."""
+    if not FF_OPTIMIZE_TARGET_VIDEO or not shutil.which("ffmpeg"):
+        return target_path
+
+    optimized_path = target_path.with_name(f"{target_path.stem}_optimized.mp4")
+    vf = (
+        f"scale='if(gt(iw,ih),min({FF_TARGET_MAX_WIDTH},iw),-2)':"
+        f"'if(gt(iw,ih),-2,min({FF_TARGET_MAX_WIDTH},ih))':flags=fast_bilinear,"
+        f"fps={FF_TARGET_FPS}"
+    )
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", str(target_path),
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "28",
+        "-c:a", "aac",
+        "-b:a", "96k",
+        "-movflags", "+faststart",
+        str(optimized_path),
+    ]
+    started_at = time.perf_counter()
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0 and optimized_path.exists() and optimized_path.stat().st_size > 0:
+            original_size = target_path.stat().st_size if target_path.exists() else 0
+            optimized_size = optimized_path.stat().st_size
+            print(
+                f"[video-preprocess] {target_path.name}: {original_size} -> {optimized_size} bytes "
+                f"in {time.perf_counter() - started_at:.2f}s",
+                flush=True,
+            )
+            return optimized_path
+        print(f"[video-preprocess] skipped: {result.stderr[-500:]}", flush=True)
+    except Exception as exc:
+        print(f"[video-preprocess] skipped: {exc}", flush=True)
+
+    try:
+        optimized_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return target_path
 
 
 def _copy_audio_from_target(target_path: Path, swapped_path: Path) -> Path:
@@ -129,27 +193,49 @@ def _copy_audio_from_target(target_path: Path, swapped_path: Path) -> Path:
 
 
 def _run_video_swap(src_path: Path, tgt_path: Path, raw_out_path: Path) -> Path:
+    prepared_tgt_path = _preprocess_target_video(tgt_path)
+    started_at = time.perf_counter()
     exit_code, stdout, stderr = _run_facefusion([
         "--source-paths", str(src_path),
-        "--target-path", str(tgt_path),
+        "--target-path", str(prepared_tgt_path),
         "--output-path", str(raw_out_path),
         "--processors", FF_PROCESSORS,
         "--face-swapper-model", FF_FACE_SWAPPER_MODEL,
         "--execution-providers", FF_EXECUTION_PROVIDERS,
+        "--execution-thread-count", FF_EXECUTION_THREAD_COUNT,
+        "--output-video-preset", FF_OUTPUT_VIDEO_PRESET,
+        "--output-video-quality", FF_OUTPUT_VIDEO_QUALITY,
+        "--output-video-fps", FF_OUTPUT_VIDEO_FPS,
+        "--log-level", "warn",
     ], timeout=1800)
+    print(f"[video-swap] facefusion finished in {time.perf_counter() - started_at:.2f}s exit={exit_code}", flush=True)
 
     if exit_code != 0 or not raw_out_path.exists():
         error_detail = stderr.strip() or stdout.strip() or "Unknown error"
         raise RuntimeError(f"Video face swap failed: {error_detail}")
 
-    return _copy_audio_from_target(tgt_path, raw_out_path)
+    try:
+        return _copy_audio_from_target(prepared_tgt_path, raw_out_path)
+    finally:
+        if prepared_tgt_path != tgt_path:
+            try:
+                prepared_tgt_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _process_video_job(job_id: str, src_path: Path, tgt_path: Path, raw_out_path: Path) -> None:
-    _set_job(job_id, status="processing", updated_at=time.time())
+    _set_job(job_id, status="processing", processing_started_at=time.time(), updated_at=time.time())
+    started_at = time.perf_counter()
     try:
         final_path = _run_video_swap(src_path, tgt_path, raw_out_path)
-        _set_job(job_id, status="completed", output_path=str(final_path), updated_at=time.time())
+        _set_job(
+            job_id,
+            status="completed",
+            output_path=str(final_path),
+            processing_seconds=round(time.perf_counter() - started_at, 3),
+            updated_at=time.time(),
+        )
     except Exception as exc:
         _set_job(job_id, status="failed", error=str(exc), updated_at=time.time())
     finally:
@@ -193,8 +279,8 @@ async def swap_image(
             raise HTTPException(400, f"{name} image is required")
 
     # Save uploads
-    src_path = _save_upload(source, "src_img")
-    tgt_path = _save_upload(target, "tgt_img")
+    src_path, _, _ = _save_upload(source, "src_img")
+    tgt_path, _, _ = _save_upload(target, "tgt_img")
     out_path = _make_output_path("img_swap", ".jpg")
 
     try:
@@ -244,8 +330,8 @@ async def swap_video(
         if not f.filename:
             raise HTTPException(400, f"{name} file is required")
 
-    src_path = _save_upload(source, "src_face")
-    tgt_path = _save_upload(target, "tgt_video")
+    src_path, _, _ = _save_upload(source, "src_face")
+    tgt_path, _, _ = _save_upload(target, "tgt_video")
     out_path = _make_output_path("vid_swap", ".mp4")
 
     try:
@@ -281,17 +367,26 @@ async def swap_video_job(
             raise HTTPException(400, f"{name} file is required")
 
     job_id = uuid.uuid4().hex
-    src_path = _save_upload(source, "src_face")
-    tgt_path = _save_upload(target, "tgt_video")
+    upload_started_at = time.perf_counter()
+    src_path, source_bytes, source_save_seconds = _save_upload(source, "src_face")
+    tgt_path, target_bytes, target_save_seconds = _save_upload(target, "tgt_video")
+    upload_save_seconds = time.perf_counter() - upload_started_at
     out_path = _make_output_path(f"vid_swap_{job_id}", ".mp4")
-    _set_job(job_id, status="queued", output_path=None, error=None, created_at=time.time(), updated_at=time.time())
-
-    thread = threading.Thread(
-        target=_process_video_job,
-        args=(job_id, src_path, tgt_path, out_path),
-        daemon=True,
+    _set_job(
+        job_id,
+        status="queued",
+        output_path=None,
+        error=None,
+        source_bytes=source_bytes,
+        target_bytes=target_bytes,
+        source_save_seconds=round(source_save_seconds, 3),
+        target_save_seconds=round(target_save_seconds, 3),
+        upload_save_seconds=round(upload_save_seconds, 3),
+        created_at=time.time(),
+        updated_at=time.time(),
     )
-    thread.start()
+
+    VIDEO_JOB_EXECUTOR.submit(_process_video_job, job_id, src_path, tgt_path, out_path)
     return JSONResponse({"job_id": job_id, "status": "queued"})
 
 
@@ -307,6 +402,10 @@ async def swap_status(job_id: str):
         "error": job.get("error"),
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
+        "source_bytes": job.get("source_bytes"),
+        "target_bytes": job.get("target_bytes"),
+        "upload_save_seconds": job.get("upload_save_seconds"),
+        "processing_seconds": job.get("processing_seconds"),
     }
 
 

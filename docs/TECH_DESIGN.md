@@ -35,7 +35,7 @@ GenerationScreen
 | 状态管理 | Provider / ChangeNotifier |
 | Android minSdk | API 29 |
 | 网络 | package:http multipart upload + stream download |
-| 本地媒体 | file_picker、photo_manager、video_thumbnail、video_player |
+| 本地媒体 | file_picker、photo_manager、video_thumbnail、video_player、video_compress |
 | 通知 | flutter_local_notifications |
 | 外链 | url_launcher |
 | 测试 | flutter_test |
@@ -68,7 +68,7 @@ GenerationScreen
 职责：
 
 - 保存源人脸、目标素材、任务状态、错误、结果路径。
-- 调用 `ApiService.swapFace()`。
+- 调用 `VideoUploadOptimizer` 对大视频做上传前压缩，再调用 `ApiService.swapFace()`。
 - 维护上传、处理、下载进度。
 - 根据生命周期状态区分前台进度与后台等待。
 - 完成后触发本地通知和结果展示。
