@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('resolveJobProgress', () {
     test(
-      'uses server supplied progress when status payload includes progress',
+      'uses positive server supplied progress when status payload includes progress',
       () {
         expect(
           resolveJobProgress({
@@ -27,6 +27,23 @@ void main() {
           }, pollCount: 3),
           0.78,
         );
+      },
+    );
+
+    test(
+      'falls back to synthetic movement when server reports zero progress',
+      () {
+        final first = resolveJobProgress({
+          'status': 'processing',
+          'progress': 0,
+        }, pollCount: 1);
+        final second = resolveJobProgress({
+          'status': 'processing',
+          'progress': 0,
+        }, pollCount: 2);
+
+        expect(first, greaterThan(0));
+        expect(second, greaterThan(first));
       },
     );
 

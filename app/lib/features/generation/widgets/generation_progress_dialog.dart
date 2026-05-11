@@ -25,10 +25,9 @@ class GenerationProgressDialog extends StatelessWidget {
       builder: (context, currentProvider, _) {
         if (currentProvider.status != GenerationStatus.processing) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            }
+            Navigator.of(context, rootNavigator: true).maybePop();
           });
+          return const SizedBox.shrink();
         }
 
         // ignore: deprecated_member_use -- DialogRoute hardware-back interception still relies on WillPopScope here.

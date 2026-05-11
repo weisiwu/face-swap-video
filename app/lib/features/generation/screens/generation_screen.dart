@@ -16,7 +16,7 @@ import 'package:face_swap_video/features/auth/screens/login_screen.dart';
 import 'package:face_swap_video/features/media/screens/photo_grid_screen.dart';
 import 'package:face_swap_video/features/media/screens/video_grid_screen.dart';
 
-const String _appVersion = '1.7.1';
+const String _appVersion = '1.7.5';
 
 class GenerationScreen extends StatefulWidget {
   const GenerationScreen({super.key, this.onExitApp = SystemNavigator.pop});

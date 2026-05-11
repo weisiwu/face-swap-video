@@ -2,9 +2,11 @@ import 'package:face_swap_video/main.dart';
 import 'package:face_swap_video/features/auth/providers/auth_provider.dart';
 import 'package:face_swap_video/features/generation/providers/generation_provider.dart';
 import 'package:face_swap_video/features/generation/screens/generation_screen.dart';
+import 'package:face_swap_video/features/generation/widgets/generation_progress_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 Widget _buildTestApp() {
   return MultiProvider(
@@ -17,6 +19,10 @@ Widget _buildTestApp() {
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
   testWidgets(
     'App opens generation screen after splash when not authenticated',
     (WidgetTester tester) async {
@@ -189,9 +195,57 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(of: stickyFooter, matching: find.text('v1.7.1')),
+        find.descendant(of: stickyFooter, matching: find.text('v1.7.5')),
         findsOneWidget,
       );
+    },
+  );
+
+  testWidgets(
+    'Processing dialog closes instead of falling back to 0 percent after provider leaves processing',
+    (WidgetTester tester) async {
+      final generationProvider = GenerationProvider()
+        ..debugSetProcessingForTest();
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: generationProvider,
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () {
+                  showDialog<void>(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (_) => GenerationProgressDialog(
+                      onCancelRequested: (_, _) async {},
+                      onBackExit: () async {},
+                    ),
+                  );
+                },
+                child: const Text('show'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('show'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.text('20%'), findsOneWidget);
+
+      generationProvider.reset();
+      await tester.pump();
+
+      expect(find.text('0%'), findsNothing);
+      expect(find.text('AI 换脸处理中...'), findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump(const Duration(milliseconds: 250));
+
+      expect(find.text('0%'), findsNothing);
+      expect(find.text('AI 换脸处理中...'), findsNothing);
     },
   );
 

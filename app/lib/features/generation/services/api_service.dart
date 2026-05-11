@@ -16,6 +16,7 @@ class ApiService {
   static const String _imageSwapEndpoint = '/api/swap/image';
   static const String _videoJobEndpoint = '/api/swap/video/job';
   static const String _videoStatusEndpointPrefix = '/api/swap/status';
+  static const String _videoCancelEndpointPrefix = '/api/swap/cancel';
   static const String _videoResultEndpointPrefix = '/api/swap/result';
   static const Duration _healthTimeout = Duration(seconds: 10);
   static const Duration _uploadTimeout = Duration(minutes: 5);
@@ -82,8 +83,8 @@ class ApiService {
     ).timeout(_uploadTimeout);
 
     if (streamedResponse.statusCode != 200) {
-      final body = await streamedResponse.stream.bytesToString();
-      throw ApiException(streamedResponse.statusCode, 'Swap failed: $body');
+      await streamedResponse.stream.drain<void>();
+      throw ApiException(streamedResponse.statusCode, '处理接口返回异常，请稍后重试');
     }
 
     // Download result to temp file
@@ -128,10 +129,7 @@ class ApiService {
     ).timeout(_uploadTimeout);
     final body = await streamedResponse.stream.bytesToString();
     if (streamedResponse.statusCode != 200) {
-      throw ApiException(
-        streamedResponse.statusCode,
-        'Start video job failed: $body',
-      );
+      throw ApiException(streamedResponse.statusCode, '处理接口返回异常，请稍后重试');
     }
 
     final payload = jsonDecode(body) as Map<String, dynamic>;
@@ -173,10 +171,7 @@ class ApiService {
         throw ApiException(0, '网络连接暂时不可用，请稍后重试');
       }
       if (statusResponse.statusCode != 200) {
-        throw ApiException(
-          statusResponse.statusCode,
-          'Job status failed: ${statusResponse.body}',
-        );
+        throw ApiException(statusResponse.statusCode, '处理接口返回异常，请稍后重试');
       }
 
       final payload = jsonDecode(statusResponse.body) as Map<String, dynamic>;
@@ -190,11 +185,8 @@ class ApiService {
         onProgress?.call(resolvedProgress);
         return _downloadJobResult(jobId: jobId, onProgress: onProgress);
       }
-      if (status == 'failed') {
-        throw ApiException(
-          500,
-          payload['error']?.toString() ?? 'Video job failed',
-        );
+      if (status == 'failed' || status == 'cancelled') {
+        throw ApiException(500, _userFriendlyProcessingError(payload['error']));
       }
 
       onProgress?.call(resolvedProgress);
@@ -202,6 +194,16 @@ class ApiService {
     }
 
     throw ApiException(408, '视频处理超时，请稍后重试');
+  }
+
+  Future<void> cancelSwapJob(String jobId) async {
+    try {
+      await http
+          .post(Uri.parse('$_baseUrl$_videoCancelEndpointPrefix/$jobId'))
+          .timeout(_statusRequestTimeout);
+    } catch (_) {
+      // Best-effort: local cancellation must not block the UI.
+    }
   }
 
   Future<String> _downloadJobResult({
@@ -214,11 +216,8 @@ class ApiService {
     );
     final streamedResponse = await request.send().timeout(_downloadTimeout);
     if (streamedResponse.statusCode != 200) {
-      final body = await streamedResponse.stream.bytesToString();
-      throw ApiException(
-        streamedResponse.statusCode,
-        'Download result failed: $body',
-      );
+      await streamedResponse.stream.drain<void>();
+      throw ApiException(streamedResponse.statusCode, '处理接口返回异常，请稍后重试');
     }
 
     final outputPath =
@@ -328,6 +327,25 @@ class ApiService {
         error.toString().contains('SocketException') ||
         error.toString().contains('Failed host lookup') ||
         error.toString().contains('failed host lookup');
+  }
+
+  String _userFriendlyProcessingError(Object? rawError) {
+    final message = rawError?.toString().trim() ?? '';
+    if (message.isEmpty) {
+      return '处理接口返回异常，请稍后重试';
+    }
+
+    final normalized = message.toLowerCase();
+    if (normalized.contains('no source face detected') ||
+        normalized.contains('source face')) {
+      return '没有检测到人脸，请换一张清晰正脸照后重试';
+    }
+    if (normalized.contains('no target face detected') ||
+        normalized.contains('target face')) {
+      return '目标视频中没有检测到可替换的人脸，请换一段正脸更清晰的视频';
+    }
+
+    return message;
   }
 }
 

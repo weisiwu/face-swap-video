@@ -6,7 +6,7 @@ double resolveJobProgress(
   if (status == 'completed') return 0.95;
 
   final serverProgress = _readServerProgress(payload);
-  if (serverProgress != null) {
+  if (serverProgress != null && serverProgress > 0) {
     return serverProgress.clamp(0.0, 0.94).toDouble();
   }
 
