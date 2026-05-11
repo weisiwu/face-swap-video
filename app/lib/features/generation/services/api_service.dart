@@ -3,8 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 
+import 'package:face_swap_video/core/services/app_logger.dart';
 import 'package:face_swap_video/features/generation/utils/job_progress.dart';
 import 'package:face_swap_video/features/media/utils/media_file_types.dart';
+
+const String _logTag = 'ApiService';
 
 typedef UploadProgressCallback = void Function(int sentBytes, int totalBytes);
 
@@ -34,16 +37,31 @@ class ApiService {
   /// Update the API base URL (e.g., when tunnel URL changes)
   void setBaseUrl(String url) {
     _baseUrl = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+    appLogger.i(_logTag, 'baseUrl updated to $_baseUrl');
   }
 
   /// Health check
   Future<bool> healthCheck() async {
+    final url = '$_baseUrl$_healthEndpoint';
+    appLogger.i(_logTag, 'healthCheck -> GET $url');
+    final stopwatch = Stopwatch()..start();
     try {
-      final response = await http
-          .get(Uri.parse('$_baseUrl$_healthEndpoint'))
-          .timeout(_healthTimeout);
-      return response.statusCode == 200;
-    } catch (_) {
+      final response = await http.get(Uri.parse(url)).timeout(_healthTimeout);
+      stopwatch.stop();
+      final ok = response.statusCode == 200;
+      appLogger.i(
+        _logTag,
+        'healthCheck status=${response.statusCode} ok=$ok elapsedMs=${stopwatch.elapsedMilliseconds}',
+      );
+      return ok;
+    } catch (error, stack) {
+      stopwatch.stop();
+      appLogger.w(
+        _logTag,
+        'healthCheck failed elapsedMs=${stopwatch.elapsedMilliseconds}',
+        error,
+        stack,
+      );
       return false;
     }
   }
@@ -61,6 +79,10 @@ class ApiService {
     UploadProgressCallback? onUploadProgress,
   }) async {
     final isVideo = isVideoFilePath(targetPath);
+    appLogger.i(
+      _logTag,
+      'swapFace start isVideo=$isVideo sourcePath=$sourcePath targetPath=$targetPath',
+    );
     if (isVideo) {
       final jobId = await swapVideoJob(
         sourcePath: sourcePath,
@@ -69,10 +91,15 @@ class ApiService {
       );
       return pollSwapJob(jobId: jobId, onProgress: onProgress);
     }
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$_baseUrl$_imageSwapEndpoint'),
+    final url = '$_baseUrl$_imageSwapEndpoint';
+    final sourceSize = await _safeFileSize(sourcePath);
+    final targetSize = await _safeFileSize(targetPath);
+    appLogger.i(
+      _logTag,
+      'swapFace image -> POST $url sourceBytes=$sourceSize targetBytes=$targetSize',
     );
+    final stopwatch = Stopwatch()..start();
+    final request = http.MultipartRequest('POST', Uri.parse(url));
 
     request.files.add(await http.MultipartFile.fromPath('source', sourcePath));
     request.files.add(await http.MultipartFile.fromPath('target', targetPath));
@@ -84,6 +111,11 @@ class ApiService {
 
     if (streamedResponse.statusCode != 200) {
       await streamedResponse.stream.drain<void>();
+      stopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'swapFace image non-200 status=${streamedResponse.statusCode} elapsedMs=${stopwatch.elapsedMilliseconds}',
+      );
       throw ApiException(streamedResponse.statusCode, '处理接口返回异常，请稍后重试');
     }
 
@@ -95,19 +127,40 @@ class ApiService {
     final file = File(outputPath);
     final totalBytes =
         int.tryParse(streamedResponse.headers['content-length'] ?? '') ?? 0;
+    appLogger.i(
+      _logTag,
+      'swapFace image download outputPath=$outputPath totalBytes=$totalBytes',
+    );
 
     var downloadedBytes = 0;
     final sink = file.openWrite();
 
-    await for (final chunk in streamedResponse.stream) {
-      sink.add(chunk);
-      downloadedBytes += chunk.length;
-      if (totalBytes > 0 && onProgress != null) {
-        onProgress(downloadedBytes / totalBytes);
+    try {
+      await for (final chunk in streamedResponse.stream) {
+        sink.add(chunk);
+        downloadedBytes += chunk.length;
+        if (totalBytes > 0 && onProgress != null) {
+          onProgress(downloadedBytes / totalBytes);
+        }
       }
+    } catch (error, stack) {
+      stopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'swapFace image download stream error downloadedBytes=$downloadedBytes elapsedMs=${stopwatch.elapsedMilliseconds}',
+        error,
+        stack,
+      );
+      await sink.close();
+      rethrow;
     }
 
     await sink.close();
+    stopwatch.stop();
+    appLogger.i(
+      _logTag,
+      'swapFace image done downloadedBytes=$downloadedBytes elapsedMs=${stopwatch.elapsedMilliseconds} outputPath=$outputPath',
+    );
     return outputPath;
   }
 
@@ -116,28 +169,58 @@ class ApiService {
     required String targetPath,
     UploadProgressCallback? onUploadProgress,
   }) async {
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$_baseUrl$_videoJobEndpoint'),
+    final url = '$_baseUrl$_videoJobEndpoint';
+    final sourceSize = await _safeFileSize(sourcePath);
+    final targetSize = await _safeFileSize(targetPath);
+    appLogger.i(
+      _logTag,
+      'swapVideoJob -> POST $url sourceBytes=$sourceSize targetBytes=$targetSize sourcePath=$sourcePath targetPath=$targetPath',
     );
+
+    final request = http.MultipartRequest('POST', Uri.parse(url));
     request.files.add(await http.MultipartFile.fromPath('source', sourcePath));
     request.files.add(await http.MultipartFile.fromPath('target', targetPath));
 
-    final streamedResponse = await _sendMultipartRequest(
-      request,
-      onUploadProgress: onUploadProgress,
-    ).timeout(_uploadTimeout);
-    final body = await streamedResponse.stream.bytesToString();
-    if (streamedResponse.statusCode != 200) {
-      throw ApiException(streamedResponse.statusCode, '处理接口返回异常，请稍后重试');
-    }
+    final stopwatch = Stopwatch()..start();
+    try {
+      final streamedResponse = await _sendMultipartRequest(
+        request,
+        onUploadProgress: onUploadProgress,
+      ).timeout(_uploadTimeout);
+      final body = await streamedResponse.stream.bytesToString();
+      stopwatch.stop();
+      appLogger.i(
+        _logTag,
+        'swapVideoJob response status=${streamedResponse.statusCode} elapsedMs=${stopwatch.elapsedMilliseconds} bodyBytes=${body.length}',
+      );
+      if (streamedResponse.statusCode != 200) {
+        appLogger.w(_logTag, 'swapVideoJob non-200 body=${_truncate(body)}');
+        throw ApiException(streamedResponse.statusCode, '处理接口返回异常，请稍后重试');
+      }
 
-    final payload = jsonDecode(body) as Map<String, dynamic>;
-    final jobId = payload['job_id'] as String?;
-    if (jobId == null || jobId.isEmpty) {
-      throw ApiException(500, 'Server did not return a job id');
+      final payload = jsonDecode(body) as Map<String, dynamic>;
+      final jobId = payload['job_id'] as String?;
+      if (jobId == null || jobId.isEmpty) {
+        appLogger.e(
+          _logTag,
+          'swapVideoJob missing job_id payload=${_truncate(body)}',
+        );
+        throw ApiException(500, 'Server did not return a job id');
+      }
+      appLogger.i(_logTag, 'swapVideoJob jobId=$jobId');
+      return jobId;
+    } on ApiException {
+      rethrow;
+    } catch (error, stack) {
+      stopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'swapVideoJob failure elapsedMs=${stopwatch.elapsedMilliseconds}',
+        error,
+        stack,
+      );
+      rethrow;
     }
-    return jobId;
   }
 
   Future<String> pollSwapJob({
@@ -145,6 +228,7 @@ class ApiService {
     void Function(double progress)? onProgress,
   }) async {
     final startedAt = DateTime.now();
+    appLogger.i(_logTag, 'pollSwapJob start jobId=$jobId');
 
     var transientNetworkFailures = 0;
     var pollCount = 0;
@@ -156,10 +240,15 @@ class ApiService {
             .get(Uri.parse('$_baseUrl$_videoStatusEndpointPrefix/$jobId'))
             .timeout(_statusRequestTimeout);
         transientNetworkFailures = 0;
-      } catch (e) {
+      } catch (e, stack) {
         if (_isTransientNetworkError(e) && transientNetworkFailures < 90) {
           transientNetworkFailures++;
           pollCount++;
+          appLogger.w(
+            _logTag,
+            'pollSwapJob transient network error jobId=$jobId pollCount=$pollCount transientCount=$transientNetworkFailures',
+            e,
+          );
           onProgress?.call(
             resolveJobProgress(const {
               'status': 'processing',
@@ -168,24 +257,44 @@ class ApiService {
           await Future<void>.delayed(_pollInterval);
           continue;
         }
+        appLogger.e(
+          _logTag,
+          'pollSwapJob fatal network error jobId=$jobId pollCount=$pollCount',
+          e,
+          stack,
+        );
         throw ApiException(0, '网络连接暂时不可用，请稍后重试');
       }
       if (statusResponse.statusCode != 200) {
+        appLogger.w(
+          _logTag,
+          'pollSwapJob non-200 jobId=$jobId status=${statusResponse.statusCode} body=${_truncate(statusResponse.body)}',
+        );
         throw ApiException(statusResponse.statusCode, '处理接口返回异常，请稍后重试');
       }
 
       final payload = jsonDecode(statusResponse.body) as Map<String, dynamic>;
       pollCount++;
       final status = payload['status'] as String?;
+      final serverProgress = payload['progress'];
       final resolvedProgress = resolveJobProgress(
         payload,
         pollCount: pollCount,
+      );
+      final elapsedSec = DateTime.now().difference(startedAt).inSeconds;
+      appLogger.i(
+        _logTag,
+        'pollSwapJob jobId=$jobId pollCount=$pollCount elapsedSec=$elapsedSec status=$status serverProgress=$serverProgress resolvedProgress=${resolvedProgress.toStringAsFixed(3)}',
       );
       if (status == 'completed') {
         onProgress?.call(resolvedProgress);
         return _downloadJobResult(jobId: jobId, onProgress: onProgress);
       }
       if (status == 'failed' || status == 'cancelled') {
+        appLogger.e(
+          _logTag,
+          'pollSwapJob terminal jobId=$jobId status=$status error=${payload['error']}',
+        );
         throw ApiException(500, _userFriendlyProcessingError(payload['error']));
       }
 
@@ -193,16 +302,26 @@ class ApiService {
       await Future<void>.delayed(_pollInterval);
     }
 
+    appLogger.e(
+      _logTag,
+      'pollSwapJob timeout jobId=$jobId pollCount=$pollCount totalSec=${DateTime.now().difference(startedAt).inSeconds}',
+    );
     throw ApiException(408, '视频处理超时，请稍后重试');
   }
 
   Future<void> cancelSwapJob(String jobId) async {
+    appLogger.i(_logTag, 'cancelSwapJob jobId=$jobId');
     try {
-      await http
+      final response = await http
           .post(Uri.parse('$_baseUrl$_videoCancelEndpointPrefix/$jobId'))
           .timeout(_statusRequestTimeout);
-    } catch (_) {
+      appLogger.i(
+        _logTag,
+        'cancelSwapJob jobId=$jobId status=${response.statusCode}',
+      );
+    } catch (error, stack) {
       // Best-effort: local cancellation must not block the UI.
+      appLogger.w(_logTag, 'cancelSwapJob failed jobId=$jobId', error, stack);
     }
   }
 
@@ -210,13 +329,18 @@ class ApiService {
     required String jobId,
     void Function(double progress)? onProgress,
   }) async {
-    final request = http.Request(
-      'GET',
-      Uri.parse('$_baseUrl$_videoResultEndpointPrefix/$jobId'),
-    );
+    final url = '$_baseUrl$_videoResultEndpointPrefix/$jobId';
+    appLogger.i(_logTag, 'downloadJobResult start jobId=$jobId url=$url');
+    final stopwatch = Stopwatch()..start();
+    final request = http.Request('GET', Uri.parse(url));
     final streamedResponse = await request.send().timeout(_downloadTimeout);
     if (streamedResponse.statusCode != 200) {
       await streamedResponse.stream.drain<void>();
+      stopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'downloadJobResult non-200 jobId=$jobId status=${streamedResponse.statusCode}',
+      );
       throw ApiException(streamedResponse.statusCode, '处理接口返回异常，请稍后重试');
     }
 
@@ -225,17 +349,51 @@ class ApiService {
     final file = File(outputPath);
     final totalBytes =
         int.tryParse(streamedResponse.headers['content-length'] ?? '') ?? 0;
+    appLogger.i(
+      _logTag,
+      'downloadJobResult writing jobId=$jobId outputPath=$outputPath totalBytes=$totalBytes',
+    );
     var downloadedBytes = 0;
     final sink = file.openWrite();
-    await for (final chunk in streamedResponse.stream) {
-      sink.add(chunk);
-      downloadedBytes += chunk.length;
-      if (totalBytes > 0) {
-        onProgress?.call(0.95 + (downloadedBytes / totalBytes) * 0.05);
+    try {
+      await for (final chunk in streamedResponse.stream) {
+        sink.add(chunk);
+        downloadedBytes += chunk.length;
+        if (totalBytes > 0) {
+          onProgress?.call(0.95 + (downloadedBytes / totalBytes) * 0.05);
+        }
       }
+    } catch (error, stack) {
+      stopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'downloadJobResult stream error jobId=$jobId downloadedBytes=$downloadedBytes',
+        error,
+        stack,
+      );
+      await sink.close();
+      rethrow;
     }
     await sink.close();
+    stopwatch.stop();
+    appLogger.i(
+      _logTag,
+      'downloadJobResult done jobId=$jobId downloadedBytes=$downloadedBytes elapsedMs=${stopwatch.elapsedMilliseconds}',
+    );
     return outputPath;
+  }
+
+  Future<int> _safeFileSize(String path) async {
+    try {
+      return await File(path).length();
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  String _truncate(String value, {int max = 500}) {
+    if (value.length <= max) return value;
+    return '${value.substring(0, max)}...<truncated>';
   }
 
   Future<http.StreamedResponse> _sendMultipartRequest(
@@ -282,11 +440,40 @@ class ApiService {
     UploadProgressCallback? onUploadProgress,
   }) async* {
     var sentBytes = 0;
+    var nextLogThreshold = 0.25;
+    final stopwatch = Stopwatch()..start();
+    appLogger.i(_logTag, 'upload start totalBytes=$totalBytes');
     onUploadProgress?.call(sentBytes, totalBytes);
-    await for (final chunk in stream) {
-      sentBytes += chunk.length;
-      onUploadProgress?.call(sentBytes, totalBytes);
-      yield chunk;
+    try {
+      await for (final chunk in stream) {
+        sentBytes += chunk.length;
+        onUploadProgress?.call(sentBytes, totalBytes);
+        if (totalBytes > 0) {
+          final fraction = sentBytes / totalBytes;
+          while (nextLogThreshold <= 1.0 && fraction >= nextLogThreshold) {
+            appLogger.i(
+              _logTag,
+              'upload progress ${(nextLogThreshold * 100).round()}% sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds}',
+            );
+            nextLogThreshold += 0.25;
+          }
+        }
+        yield chunk;
+      }
+      stopwatch.stop();
+      appLogger.i(
+        _logTag,
+        'upload finished sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds}',
+      );
+    } catch (error, stack) {
+      stopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'upload aborted sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds}',
+        error,
+        stack,
+      );
+      rethrow;
     }
   }
 

@@ -3,7 +3,10 @@ import 'dart:io';
 
 import 'package:video_compress/video_compress.dart';
 
+import 'package:face_swap_video/core/services/app_logger.dart';
 import 'package:face_swap_video/features/media/utils/media_file_types.dart';
+
+const String _logTag = 'VideoUploadOptimizer';
 
 typedef VideoCompressionProgressCallback = void Function(double progress);
 
@@ -39,14 +42,31 @@ class VideoCompressUploadOptimizer implements VideoUploadOptimizer {
     String targetPath, {
     VideoCompressionProgressCallback? onProgress,
   }) async {
-    if (!isVideoFilePath(targetPath)) return targetPath;
+    if (!isVideoFilePath(targetPath)) {
+      appLogger.i(_logTag, 'skip non-video path=$targetPath');
+      return targetPath;
+    }
 
     final sourceFile = File(targetPath);
-    if (!await sourceFile.exists()) return targetPath;
+    if (!await sourceFile.exists()) {
+      appLogger.w(_logTag, 'source missing path=$targetPath');
+      return targetPath;
+    }
 
     final originalBytes = await sourceFile.length();
-    if (originalBytes < _minCompressBytes) return targetPath;
+    if (originalBytes < _minCompressBytes) {
+      appLogger.i(
+        _logTag,
+        'skip small video originalBytes=$originalBytes threshold=$_minCompressBytes path=$targetPath',
+      );
+      return targetPath;
+    }
 
+    appLogger.i(
+      _logTag,
+      'compress start originalBytes=$originalBytes path=$targetPath',
+    );
+    final stopwatch = Stopwatch()..start();
     Subscription? subscription;
     try {
       subscription = VideoCompress.compressProgress$.subscribe((progress) {
@@ -61,18 +81,43 @@ class VideoCompressUploadOptimizer implements VideoUploadOptimizer {
         frameRate: 24,
       );
       final optimizedPath = mediaInfo?.path;
-      if (optimizedPath == null || optimizedPath.isEmpty) return targetPath;
-
-      final optimizedFile = File(optimizedPath);
-      if (!await optimizedFile.exists()) return targetPath;
-
-      final optimizedBytes = await optimizedFile.length();
-      if (optimizedBytes <= 0 || optimizedBytes >= originalBytes) {
+      if (optimizedPath == null || optimizedPath.isEmpty) {
+        appLogger.w(
+          _logTag,
+          'compress returned empty path; falling back to original',
+        );
         return targetPath;
       }
 
+      final optimizedFile = File(optimizedPath);
+      if (!await optimizedFile.exists()) {
+        appLogger.w(_logTag, 'compress output missing path=$optimizedPath');
+        return targetPath;
+      }
+
+      final optimizedBytes = await optimizedFile.length();
+      stopwatch.stop();
+      if (optimizedBytes <= 0 || optimizedBytes >= originalBytes) {
+        appLogger.i(
+          _logTag,
+          'compress not beneficial originalBytes=$originalBytes optimizedBytes=$optimizedBytes elapsedMs=${stopwatch.elapsedMilliseconds}; using original',
+        );
+        return targetPath;
+      }
+
+      appLogger.i(
+        _logTag,
+        'compress done originalBytes=$originalBytes optimizedBytes=$optimizedBytes elapsedMs=${stopwatch.elapsedMilliseconds} path=$optimizedPath',
+      );
       return optimizedPath;
-    } catch (_) {
+    } catch (error, stack) {
+      stopwatch.stop();
+      appLogger.w(
+        _logTag,
+        'compress error elapsedMs=${stopwatch.elapsedMilliseconds}; falling back to original',
+        error,
+        stack,
+      );
       return targetPath;
     } finally {
       subscription?.unsubscribe();
@@ -80,5 +125,8 @@ class VideoCompressUploadOptimizer implements VideoUploadOptimizer {
   }
 
   @override
-  Future<void> cancel() => VideoCompress.cancelCompression();
+  Future<void> cancel() {
+    appLogger.i(_logTag, 'cancel compression requested');
+    return VideoCompress.cancelCompression();
+  }
 }

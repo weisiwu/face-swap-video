@@ -5,11 +5,14 @@ import 'package:face_swap_video/features/auth/providers/auth_provider.dart';
 import 'package:face_swap_video/features/generation/providers/generation_provider.dart';
 import 'package:face_swap_video/features/auth/screens/auth_gate.dart';
 import 'package:face_swap_video/core/screens/splash_screen.dart';
+import 'package:face_swap_video/core/services/app_logger.dart';
 import 'package:face_swap_video/core/services/notification_service.dart';
 import 'package:face_swap_video/core/utils/app_lifecycle_background.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppLogger.instance.init();
+  appLogger.i('App', 'app starting up');
   await NotificationService.initialize();
   runApp(
     MultiProvider(
@@ -51,6 +54,7 @@ class _FaceSwapAppState extends State<FaceSwapApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     final isBackground = isBackgroundLifecycleState(state);
+    appLogger.i('App', 'lifecycle state=$state isBackground=$isBackground');
     context.read<GenerationProvider>().setAppLifecycleInBackground(
       isBackground,
     );

@@ -1,10 +1,13 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:face_swap_video/core/services/app_logger.dart';
 import 'package:face_swap_video/features/media/utils/album_display_name.dart';
 import 'package:face_swap_video/features/media/widgets/media_album_picker_sheet.dart';
 import 'package:face_swap_video/features/media/widgets/media_permission_denied.dart';
 import 'package:face_swap_video/features/media/widgets/photo_tile.dart';
+
+const String _logTag = 'PhotoGrid';
 
 /// 照片网格选择器
 /// 直接获取设备相册权限，以 3 列网格展示照片，支持切换相册/文件夹，单选一张后返回路径
@@ -30,7 +33,12 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
   }
 
   Future<void> _requestAndLoad() async {
+    appLogger.i(_logTag, 'requestPermission start');
     final perm = await PhotoManager.requestPermissionExtend();
+    appLogger.i(
+      _logTag,
+      'requestPermission result=$perm isAuth=${perm.isAuth} hasAccess=${perm.hasAccess}',
+    );
     if (!mounted) return;
 
     // isAuth 或 hasAccess 都视为有权限（兼容 Android 13+ 的 limited access）
@@ -58,6 +66,7 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
       type: RequestType.image,
       onlyAll: false,
     );
+    appLogger.i(_logTag, 'loadAlbums count=${albums.length}');
 
     if (!mounted) return;
 
@@ -135,18 +144,28 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
     // 获取原文件路径
     final file = await asset.file;
     if (file != null && mounted) {
+      appLogger.i(_logTag, 'select photo from album path=${file.path}');
       Navigator.of(context).pop(file.path);
+    } else if (file == null) {
+      appLogger.w(
+        _logTag,
+        'select photo from album returned null file assetId=${asset.id}',
+      );
     }
   }
 
   Future<void> _pickPhotoFromFileManager() async {
+    appLogger.i(_logTag, 'pickPhotoFromFileManager open');
     final result = await FilePicker.pickFiles(
       type: FileType.image,
       allowMultiple: false,
     );
     final path = result?.files.single.path;
     if (path != null && path.isNotEmpty && mounted) {
+      appLogger.i(_logTag, 'pickPhotoFromFileManager selected path=$path');
       Navigator.of(context).pop(path);
+    } else {
+      appLogger.i(_logTag, 'pickPhotoFromFileManager cancelled');
     }
   }
 

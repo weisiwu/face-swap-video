@@ -4,6 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import 'package:face_swap_video/core/services/app_logger.dart';
+
+const String _logTag = 'ResultVideoPreview';
+
 class ResultVideoPreview extends StatefulWidget {
   const ResultVideoPreview({super.key, required this.resultPath});
 
@@ -28,13 +32,25 @@ class _ResultVideoPreviewState extends State<ResultVideoPreview> {
   }
 
   Future<void> _initialize() async {
+    appLogger.i(_logTag, 'initialize path=${widget.resultPath}');
     try {
       await _controller.initialize();
       await _controller.setLooping(false);
+      final value = _controller.value;
+      appLogger.i(
+        _logTag,
+        'initialize done size=${value.size.width.toInt()}x${value.size.height.toInt()} durationMs=${value.duration.inMilliseconds}',
+      );
       if (mounted) {
         setState(() => _initializing = false);
       }
-    } catch (e) {
+    } catch (error, stack) {
+      appLogger.e(
+        _logTag,
+        'initialize failed path=${widget.resultPath}',
+        error,
+        stack,
+      );
       if (mounted) {
         setState(() {
           _initializing = false;

@@ -4,11 +4,14 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
+import 'package:face_swap_video/core/services/app_logger.dart';
 import 'package:face_swap_video/features/media/utils/album_display_name.dart';
 import 'package:face_swap_video/features/media/utils/video_upload_limits.dart';
 import 'package:face_swap_video/features/media/widgets/media_album_picker_sheet.dart';
 import 'package:face_swap_video/features/media/widgets/media_permission_denied.dart';
 import 'package:face_swap_video/features/media/widgets/video_tile.dart';
+
+const String _logTag = 'VideoGrid';
 
 /// 视频网格选择器
 /// 与 PhotoGridScreen 同架构，筛选视频、支持切换相册/文件夹、3 列网格、单选返回路径
@@ -34,7 +37,12 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
   }
 
   Future<void> _requestAndLoad() async {
+    appLogger.i(_logTag, 'requestPermission start');
     final perm = await PhotoManager.requestPermissionExtend();
+    appLogger.i(
+      _logTag,
+      'requestPermission result=$perm isAuth=${perm.isAuth} hasAccess=${perm.hasAccess}',
+    );
     if (!mounted) return;
 
     // isAuth 或 hasAccess 都视为有权限（兼容 Android 13+ limited access）
@@ -62,6 +70,7 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
       type: RequestType.video,
       onlyAll: false, // 获取所有相册，包括 Movies / Download 等
     );
+    appLogger.i(_logTag, 'loadAlbums count=${albums.length}');
 
     if (!mounted) return;
 
@@ -138,7 +147,15 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
 
   Future<void> _onVideoTap(AssetEntity asset) async {
     final file = await asset.file;
-    if (file == null || !mounted) return;
+    if (file == null || !mounted) {
+      if (file == null) {
+        appLogger.w(
+          _logTag,
+          'video asset returned null file assetId=${asset.id}',
+        );
+      }
+      return;
+    }
 
     final validation = await _validateSelectedVideo(
       file.path,
@@ -146,28 +163,45 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
     );
     if (!mounted) return;
     if (!validation.isValid) {
+      appLogger.w(
+        _logTag,
+        'video rejected by limits path=${file.path} reason=${validation.errorMessage}',
+      );
       _showVideoLimitMessage(validation.errorMessage!);
       return;
     }
 
+    appLogger.i(
+      _logTag,
+      'select video from album path=${file.path} durationSec=${asset.duration}',
+    );
     Navigator.of(context).pop(file.path);
   }
 
   Future<void> _pickVideoFromFileManager() async {
+    appLogger.i(_logTag, 'pickVideoFromFileManager open');
     final result = await FilePicker.pickFiles(
       type: FileType.video,
       allowMultiple: false,
     );
     final path = result?.files.single.path;
-    if (path == null || path.isEmpty || !mounted) return;
+    if (path == null || path.isEmpty || !mounted) {
+      appLogger.i(_logTag, 'pickVideoFromFileManager cancelled');
+      return;
+    }
 
     final validation = await _validateSelectedVideo(path);
     if (!mounted) return;
     if (!validation.isValid) {
+      appLogger.w(
+        _logTag,
+        'video rejected by limits path=$path reason=${validation.errorMessage}',
+      );
       _showVideoLimitMessage(validation.errorMessage!);
       return;
     }
 
+    appLogger.i(_logTag, 'pickVideoFromFileManager selected path=$path');
     Navigator.of(context).pop(path);
   }
 

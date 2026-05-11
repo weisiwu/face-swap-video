@@ -2,8 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:face_swap_video/core/services/app_logger.dart';
 import 'package:face_swap_video/features/auth/services/auth_session_store.dart';
 import 'package:face_swap_video/features/auth/services/device_phone_service.dart';
+
+const String _logTag = 'AuthProvider';
+
+String _maskPhone(String? phone) {
+  if (phone == null || phone.isEmpty) return '<empty>';
+  if (phone.length < 4) return '***';
+  return '***${phone.substring(phone.length - 4)}';
+}
 
 class AuthProvider extends ChangeNotifier {
   static const String mockDevicePhone = '13800138000';
@@ -52,16 +61,24 @@ class AuthProvider extends ChangeNotifier {
   Future<void> loadSavedSession() async {
     final loadVersion = _sessionVersion;
     final session = await _sessionStore.load();
-    if (loadVersion != _sessionVersion || session == null) return;
+    if (loadVersion != _sessionVersion || session == null) {
+      appLogger.i(_logTag, 'loadSavedSession none');
+      return;
+    }
 
     _phone = session.phone;
     _isAuthenticated = true;
+    appLogger.i(
+      _logTag,
+      'loadSavedSession restored phone=${_maskPhone(session.phone)}',
+    );
     notifyListeners();
   }
 
   Future<void> loadSuggestedPhone() async {
     if (_isLoadingSuggestedPhone) return;
 
+    appLogger.i(_logTag, 'loadSuggestedPhone start');
     _isLoadingSuggestedPhone = true;
     notifyListeners();
     final detectedPhone = await (_devicePhoneService ?? DevicePhoneService())
@@ -70,6 +87,12 @@ class AuthProvider extends ChangeNotifier {
 
     if (detectedPhone != null && detectedPhone.isNotEmpty) {
       _suggestedPhone = detectedPhone;
+      appLogger.i(
+        _logTag,
+        'loadSuggestedPhone detected phone=${_maskPhone(detectedPhone)}',
+      );
+    } else {
+      appLogger.i(_logTag, 'loadSuggestedPhone no SIM phone detected');
     }
     notifyListeners();
   }
@@ -83,6 +106,7 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
 
+    appLogger.i(_logTag, 'sendCode phone=${_maskPhone(normalizedPhone)}');
     _isSendingCode = true;
     notifyListeners();
     _isSendingCode = false;
@@ -132,17 +156,32 @@ class AuthProvider extends ChangeNotifier {
       throw ArgumentError('请输入6位数字验证码');
     }
 
+    appLogger.i(
+      _logTag,
+      'loginWithSms start phone=${_maskPhone(normalizedPhone)}',
+    );
     _isLoggingIn = true;
     notifyListeners();
     _sessionVersion++;
     _phone = normalizedPhone;
     _isAuthenticated = true;
-    await _sessionStore.save(AuthSession(phone: normalizedPhone));
-    _isLoggingIn = false;
-    notifyListeners();
+    try {
+      await _sessionStore.save(AuthSession(phone: normalizedPhone));
+      appLogger.i(
+        _logTag,
+        'loginWithSms success phone=${_maskPhone(normalizedPhone)}',
+      );
+    } catch (error, stack) {
+      appLogger.e(_logTag, 'loginWithSms session save failed', error, stack);
+      rethrow;
+    } finally {
+      _isLoggingIn = false;
+      notifyListeners();
+    }
   }
 
   Future<void> logout() async {
+    appLogger.i(_logTag, 'logout phone=${_maskPhone(_phone)}');
     _sessionVersion++;
     _phone = null;
     _isAuthenticated = false;

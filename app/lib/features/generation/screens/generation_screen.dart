@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'dart:async';
 import 'dart:io';
+import 'package:face_swap_video/core/services/app_logger.dart';
 import 'package:face_swap_video/features/auth/providers/auth_provider.dart';
 import 'package:face_swap_video/features/generation/providers/generation_provider.dart';
 import 'package:face_swap_video/features/generation/widgets/generation_header.dart';
@@ -16,7 +17,7 @@ import 'package:face_swap_video/features/auth/screens/login_screen.dart';
 import 'package:face_swap_video/features/media/screens/photo_grid_screen.dart';
 import 'package:face_swap_video/features/media/screens/video_grid_screen.dart';
 
-const String _appVersion = '1.7.5';
+const String _appVersion = '1.8.0';
 
 class GenerationScreen extends StatefulWidget {
   const GenerationScreen({super.key, this.onExitApp = SystemNavigator.pop});
@@ -326,20 +327,36 @@ class _GenerationScreenState extends State<GenerationScreen> {
   ]) async {
     final resultPath = provider.resultVideoPath;
     if (resultPath == null || resultPath.isEmpty) {
+      appLogger.w('GenerationScreen', 'saveResultVideo missing path');
       await _showSaveMessageDialog('保存失败', '未找到生成的视频文件，请重新生成后再试。');
       return;
     }
 
     final file = File(resultPath);
     if (!await file.exists()) {
+      appLogger.w(
+        'GenerationScreen',
+        'saveResultVideo file missing path=$resultPath',
+      );
       await _showSaveMessageDialog('保存失败', '生成的视频文件不存在，请重新生成后再试。');
       return;
     }
 
+    final fileBytes = await file.length();
+    final stopwatch = Stopwatch()..start();
+    appLogger.i(
+      'GenerationScreen',
+      'saveResultVideo start path=$resultPath bytes=$fileBytes',
+    );
     try {
       final title =
           'face_swap_${DateTime.now().millisecondsSinceEpoch}.${resultPath.split('.').last}';
       await PhotoManager.editor.saveVideo(file, title: title);
+      stopwatch.stop();
+      appLogger.i(
+        'GenerationScreen',
+        'saveResultVideo success title=$title elapsedMs=${stopwatch.elapsedMilliseconds}',
+      );
 
       if (dialogContext != null && dialogContext.mounted) {
         Navigator.of(dialogContext).pop();
@@ -347,7 +364,14 @@ class _GenerationScreenState extends State<GenerationScreen> {
       if (mounted) {
         await _showSaveSuccessDialog();
       }
-    } catch (e) {
+    } catch (e, stack) {
+      stopwatch.stop();
+      appLogger.e(
+        'GenerationScreen',
+        'saveResultVideo failed elapsedMs=${stopwatch.elapsedMilliseconds}',
+        e,
+        stack,
+      );
       if (mounted) {
         await _showSaveMessageDialog('保存失败', '无法保存到相册：$e');
       }

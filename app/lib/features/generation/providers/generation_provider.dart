@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:face_swap_video/features/generation/services/api_service.dart';
+import 'package:face_swap_video/core/services/app_logger.dart';
 import 'package:face_swap_video/core/services/notification_service.dart';
 import 'package:face_swap_video/features/generation/services/video_upload_optimizer.dart';
 import 'package:face_swap_video/features/media/utils/media_file_types.dart';
 import 'package:face_swap_video/features/media/utils/selected_file_name.dart';
 import 'package:face_swap_video/features/generation/utils/transfer_progress_label.dart';
+
+const String _logTag = 'GenerationProvider';
 
 enum GenerationStatus { idle, ready, processing, completed, failed }
 
@@ -59,12 +62,14 @@ class GenerationProvider extends ChangeNotifier {
       _hasRequiredInputs ? GenerationStatus.ready : GenerationStatus.idle;
 
   void setVideoPath(String path) {
+    appLogger.i(_logTag, 'setVideoPath path=$path');
     _videoPath = path;
     _updateReadyStatus();
     notifyListeners();
   }
 
   void setFaceImagePath(String path) {
+    appLogger.i(_logTag, 'setFaceImagePath path=$path');
     _faceImagePath = path;
     _updateReadyStatus();
     notifyListeners();
@@ -88,20 +93,41 @@ class GenerationProvider extends ChangeNotifier {
     _currentStep = '正在连接服务器...';
     notifyListeners();
 
+    final overallStopwatch = Stopwatch()..start();
+    appLogger.i(
+      _logTag,
+      'startGeneration runId=$runId videoPath=$_videoPath faceImagePath=$_faceImagePath',
+    );
+
     try {
       // Phase 1: Check server health
       _updateProgress(0.05, '连接服务器中...', runId: runId);
       final healthy = await _api.healthCheck();
-      if (!_isActiveRun(runId)) return;
+      if (!_isActiveRun(runId)) {
+        appLogger.i(
+          _logTag,
+          'startGeneration aborted after health check runId=$runId',
+        );
+        return;
+      }
       if (!healthy) {
+        appLogger.w(
+          _logTag,
+          'startGeneration health check failed runId=$runId',
+        );
         throw ApiException(0, '无法连接到换脸服务器，请检查网络');
       }
 
       // Phase 2: shrink large target videos on-device before upload.
       final isVideoTarget = isVideoFilePath(_videoPath!);
+      appLogger.i(
+        _logTag,
+        'startGeneration runId=$runId isVideoTarget=$isVideoTarget',
+      );
       var uploadTargetPath = _videoPath!;
       if (isVideoTarget) {
         _updateProgress(0.08, '正在压缩视频，减少上传体积...', runId: runId);
+        appLogger.i(_logTag, 'startGeneration optimizing video runId=$runId');
         uploadTargetPath = await _videoUploadOptimizer.optimizeForUpload(
           _videoPath!,
           onProgress: (compressionProgress) {
@@ -112,7 +138,17 @@ class GenerationProvider extends ChangeNotifier {
             );
           },
         );
-        if (!_isActiveRun(runId)) return;
+        appLogger.i(
+          _logTag,
+          'startGeneration optimization done runId=$runId uploadTargetPath=$uploadTargetPath',
+        );
+        if (!_isActiveRun(runId)) {
+          appLogger.i(
+            _logTag,
+            'startGeneration aborted after optimization runId=$runId',
+          );
+          return;
+        }
       }
 
       // Phase 3: Upload. The visible progress bar is stage-based: upload starts
@@ -141,7 +177,14 @@ class GenerationProvider extends ChangeNotifier {
           onUploadProgress: handleUploadProgress,
         );
         _currentVideoJobId = jobId;
-        if (!_isActiveRun(runId)) return;
+        appLogger.i(_logTag, 'startGeneration jobId=$jobId runId=$runId');
+        if (!_isActiveRun(runId)) {
+          appLogger.i(
+            _logTag,
+            'startGeneration aborted after job creation runId=$runId jobId=$jobId',
+          );
+          return;
+        }
         _updateProgress(1.0, '素材上传完成', runId: runId, phaseId: uploadPhaseId);
         final processingPhaseId = _beginProgressPhase('服务器处理中...', runId);
         resultPath = await _api.pollSwapJob(
@@ -189,10 +232,22 @@ class GenerationProvider extends ChangeNotifier {
       _resultVideoPath = resultPath;
       _progress = 1.0;
       _currentStep = '生成完成';
+      overallStopwatch.stop();
+      appLogger.i(
+        _logTag,
+        'startGeneration completed runId=$runId resultPath=$resultPath totalMs=${overallStopwatch.elapsedMilliseconds}',
+      );
       if (_isAppInBackground) {
         unawaited(NotificationService.showGenerationCompleted());
       }
-    } on ApiException catch (e) {
+    } on ApiException catch (e, stack) {
+      overallStopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'startGeneration ApiException runId=$runId statusCode=${e.statusCode} message=${e.message} totalMs=${overallStopwatch.elapsedMilliseconds}',
+        e,
+        stack,
+      );
       if (!_isActiveRun(runId)) return;
       _status = GenerationStatus.failed;
       _currentVideoJobId = null;
@@ -201,7 +256,14 @@ class GenerationProvider extends ChangeNotifier {
       if (_isAppInBackground) {
         unawaited(NotificationService.showGenerationFailed(e.message));
       }
-    } on TimeoutException {
+    } on TimeoutException catch (e, stack) {
+      overallStopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'startGeneration TimeoutException runId=$runId totalMs=${overallStopwatch.elapsedMilliseconds}',
+        e,
+        stack,
+      );
       if (!_isActiveRun(runId)) return;
       _status = GenerationStatus.failed;
       _currentVideoJobId = null;
@@ -210,7 +272,14 @@ class GenerationProvider extends ChangeNotifier {
       if (_isAppInBackground) {
         unawaited(NotificationService.showGenerationFailed(_errorMessage!));
       }
-    } catch (e) {
+    } catch (e, stack) {
+      overallStopwatch.stop();
+      appLogger.e(
+        _logTag,
+        'startGeneration unknown error runId=$runId totalMs=${overallStopwatch.elapsedMilliseconds}',
+        e,
+        stack,
+      );
       if (!_isActiveRun(runId)) return;
       _status = GenerationStatus.failed;
       _currentVideoJobId = null;
@@ -229,6 +298,10 @@ class GenerationProvider extends ChangeNotifier {
   void setAppLifecycleInBackground(bool isBackground) {
     if (_isAppInBackground == isBackground) return;
 
+    appLogger.i(
+      _logTag,
+      'setAppLifecycleInBackground isBackground=$isBackground status=$_status progress=${_progress.toStringAsFixed(3)}',
+    );
     _isAppInBackground = isBackground;
     if (_status == GenerationStatus.processing) {
       if (isBackground) {
@@ -267,6 +340,10 @@ class GenerationProvider extends ChangeNotifier {
   void cancelGeneration() {
     if (_status != GenerationStatus.processing) return;
 
+    appLogger.i(
+      _logTag,
+      'cancelGeneration jobId=$_currentVideoJobId progress=${_progress.toStringAsFixed(3)}',
+    );
     _generationRunId++;
     final jobId = _currentVideoJobId;
     _currentVideoJobId = null;
