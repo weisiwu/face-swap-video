@@ -43,7 +43,7 @@
 | 状态管理 | Provider |
 | Android minSdk | API 29 / Android 10 |
 | 包名 | `com.baoganai.face_swap_video` |
-| 当前版本 | `1.6.0+2016` |
+| 当前版本 | `1.7.0+2017` |
 | 远端服务 | `https://facefusion.baoganai.com` |
 
 性能优化策略：
@@ -101,7 +101,7 @@ face-swap-video/
   ↓
 生成页
   ↓
-选择源人脸 + 目标图片/视频
+选择源人脸 + 目标图片/视频（视频不超过1分钟 / 100 MB）
   ↓
 点击生成
   ├─ 未登录 → LoginScreen Mock 手机号验证码登录 → 返回生成页

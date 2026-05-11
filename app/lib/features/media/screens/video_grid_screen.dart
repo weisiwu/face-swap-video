@@ -1,7 +1,11 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:video_player/video_player.dart';
 import 'package:face_swap_video/features/media/utils/album_display_name.dart';
+import 'package:face_swap_video/features/media/utils/video_upload_limits.dart';
 import 'package:face_swap_video/features/media/widgets/media_album_picker_sheet.dart';
 import 'package:face_swap_video/features/media/widgets/media_permission_denied.dart';
 import 'package:face_swap_video/features/media/widgets/video_tile.dart';
@@ -134,9 +138,19 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
 
   Future<void> _onVideoTap(AssetEntity asset) async {
     final file = await asset.file;
-    if (file != null && mounted) {
-      Navigator.of(context).pop(file.path);
+    if (file == null || !mounted) return;
+
+    final validation = await _validateSelectedVideo(
+      file.path,
+      duration: Duration(seconds: asset.duration),
+    );
+    if (!mounted) return;
+    if (!validation.isValid) {
+      _showVideoLimitMessage(validation.errorMessage!);
+      return;
     }
+
+    Navigator.of(context).pop(file.path);
   }
 
   Future<void> _pickVideoFromFileManager() async {
@@ -145,9 +159,53 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
       allowMultiple: false,
     );
     final path = result?.files.single.path;
-    if (path != null && path.isNotEmpty && mounted) {
-      Navigator.of(context).pop(path);
+    if (path == null || path.isEmpty || !mounted) return;
+
+    final validation = await _validateSelectedVideo(path);
+    if (!mounted) return;
+    if (!validation.isValid) {
+      _showVideoLimitMessage(validation.errorMessage!);
+      return;
     }
+
+    Navigator.of(context).pop(path);
+  }
+
+  Future<VideoUploadValidationResult> _validateSelectedVideo(
+    String path, {
+    Duration? duration,
+  }) async {
+    final file = File(path);
+    final sizeBytes = await file.exists() ? await file.length() : null;
+    final resolvedDuration = duration ?? await _readVideoDuration(path);
+    return validateVideoUploadLimits(
+      duration: resolvedDuration,
+      sizeBytes: sizeBytes,
+    );
+  }
+
+  Future<Duration?> _readVideoDuration(String path) async {
+    final controller = VideoPlayerController.file(File(path));
+    try {
+      await controller.initialize();
+      return controller.value.duration;
+    } catch (_) {
+      return null;
+    } finally {
+      await controller.dispose();
+    }
+  }
+
+  void _showVideoLimitMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('$message\n${formatVideoUploadLimitHint()}'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFDC2626),
+        ),
+      );
   }
 
   @override
@@ -229,25 +287,39 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
               color: const Color(0xFF3B82F6).withValues(alpha: 0.28),
             ),
           ),
-          child: const Row(
+          child: Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.folder_open_rounded,
                 size: 20,
                 color: Color(0xFF60A5FA),
               ),
-              SizedBox(width: 10),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  '从文件管理选择视频',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '从文件管理选择视频',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      formatVideoUploadLimitHint(),
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.52),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Icon(
+              const Icon(
                 Icons.arrow_forward_ios_rounded,
                 size: 16,
                 color: Color(0xFF60A5FA),
