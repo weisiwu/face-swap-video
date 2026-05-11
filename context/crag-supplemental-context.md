@@ -13,14 +13,24 @@
 - `workflow-crag-starter` 会生成 `.mcp.json` 与 `.claude/settings.local.json` agent 适配文件；本次未纳入提交，因为文件包含本机绝对路径，避免污染仓库。
 - 注意：`python3 -m workflow_crag.cli ...` 目前不会实际执行 CLI；如需查询，用 `python3 - <<'PY'` 导入 `workflow_crag.cli.main()` 或使用已安装的 console script。
 
-## 2. 修改前必读顺序
+## 2. Agent 指令入口兼容
+
+同一套上下文感知开发流程同时提供给不同 Agent：
+
+- Hermes：优先加载 skill `context-aware-dev`，并读取 `HERMES.md`。
+- Codex：读取仓库根目录 `AGENTS.md`。
+- 通用上下文：读取 `context/project-context.md` 与本文件。
+
+如果修改其中任一入口，必须保持 `AGENTS.md`、`HERMES.md`、`context-aware-dev` skill 与本文件语义一致。
+
+## 3. 修改前必读顺序
 
 1. `context/project-context.md`：项目铁律、阶段、Android/构建约束。
 2. 本文件：CRAG 生成的补充索引与模块责任。
 3. 针对任务使用 CRAG 查询定位相关文件，而不是直接猜文件。
 4. 读取具体源码/测试后再改动。
 
-## 3. 高优先级项目铁律
+## 4. 高优先级项目铁律
 
 - 这是 **Flutter Android App**；开发、构建、截图优先使用 Android 端验证。
 - 含中文路径导致 Gradle/Java 易异常，构建必须走 `/tmp/zfj/apps/face-swap-video/app`。
@@ -28,7 +38,7 @@
 - API 协议已固化：`/api/health`、`/api/swap/image`、`/api/swap/video/job`、`/api/swap/status/{jobId}`、`/api/swap/result/{jobId}`。
 - 版本号展示在生成页底部；功能升级 minor，Bug 修复升级 patch。
 
-## 4. 关键 LOC 索引
+## 5. 关键 LOC 索引
 
 | LOC-ID | Path | Size | Responsibility | 改动风险 |
 |---|---|---:|---|---|
@@ -46,7 +56,7 @@
 | LOC-BUILD-001 | `scripts/build-release-apks.sh` | S | Release APK 打包与命名 | 产物在 `releases/`，不要提交 APK |
 | LOC-TEST-001 | `app/test/` | M | Flutter/Dart 单元与 Widget 测试 | 改状态机/API/UI 后应补窄范围测试 |
 
-## 5. 核心数据流
+## 6. 核心数据流
 
 ```text
 main.dart
@@ -65,7 +75,7 @@ main.dart
         -> ResultPreviewDialog 保存/预览
 ```
 
-## 6. 生成流程状态机
+## 7. 生成流程状态机
 
 `GenerationProvider` 是当前项目最重要的状态聚合点：
 
@@ -80,7 +90,7 @@ main.dart
 - 并发保护：`_generationRunId` 用于取消/新一轮生成后忽略旧异步回调。
 - 后台语义：`setAppLifecycleInBackground()` 只在处理期间更新提示；完成/失败且处于后台才发通知。
 
-## 7. API 与远端服务
+## 8. API 与远端服务
 
 `ApiService` 默认指向 `https://facefusion.baoganai.com`。
 
@@ -97,14 +107,14 @@ main.dart
 - 轮询对短暂网络失败有容忍；不要把后台网络暂不可用误判成立即失败。
 - 结果路径是临时文件，预览/保存逻辑需要确保文件存在。
 
-## 8. UI 风险点
+## 9. UI 风险点
 
 - `GenerationScreen` 同时管理处理中、错误、完成、退出确认弹框；所有弹框改动都要关注 root navigator 与 post-frame 时机。
 - 完成弹框会等待处理中弹框关闭约 180ms，避免两个弹框抢 Navigator。
 - 未登录用户允许先选素材，但点击生成时进入登录；登录成功应回到原生成流程。
 - 底部版本号位于生成页，改版本时不要只改 pubspec，还要同步 UI 常量。
 
-## 9. 验证命令
+## 10. 验证命令
 
 常规最小验证：
 
@@ -129,7 +139,7 @@ cd /tmp/zfj/apps/face-swap-video
 scripts/build-release-apks.sh
 ```
 
-## 10. CRAG 查询命令
+## 11. CRAG 查询命令
 
 由于当前 `python3 -m workflow_crag.cli` 不触发 `main()`，推荐：
 
