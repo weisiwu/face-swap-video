@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:face_swap_video/features/auth/services/auth_session_store.dart';
 import 'package:face_swap_video/features/auth/services/device_phone_service.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -9,12 +10,17 @@ class AuthProvider extends ChangeNotifier {
 
   AuthProvider({
     DevicePhoneService? devicePhoneService,
+    AuthSessionStore? sessionStore,
     String? initialSuggestedPhone,
   }) : _devicePhoneService = devicePhoneService,
+       _sessionStore = sessionStore ?? SharedPreferencesAuthSessionStore(),
        _suggestedPhone =
-           initialSuggestedPhone ?? (kDebugMode ? mockDevicePhone : '');
+           initialSuggestedPhone ?? (kDebugMode ? mockDevicePhone : '') {
+    unawaited(loadSavedSession());
+  }
 
   final DevicePhoneService? _devicePhoneService;
+  final AuthSessionStore _sessionStore;
 
   bool _isAuthenticated = false;
   String? _phone;
@@ -23,6 +29,7 @@ class AuthProvider extends ChangeNotifier {
   bool _isSendingCode = false;
   bool _isLoggingIn = false;
   int _codeCountdownSeconds = 0;
+  int _sessionVersion = 0;
   Timer? _codeCountdownTimer;
 
   bool get isAuthenticated => _isAuthenticated;
@@ -40,6 +47,16 @@ class AuthProvider extends ChangeNotifier {
       return '未登录';
     }
     return '尾号 ${currentPhone.substring(currentPhone.length - 4)}';
+  }
+
+  Future<void> loadSavedSession() async {
+    final loadVersion = _sessionVersion;
+    final session = await _sessionStore.load();
+    if (loadVersion != _sessionVersion || session == null) return;
+
+    _phone = session.phone;
+    _isAuthenticated = true;
+    notifyListeners();
   }
 
   Future<void> loadSuggestedPhone() async {
@@ -117,17 +134,21 @@ class AuthProvider extends ChangeNotifier {
 
     _isLoggingIn = true;
     notifyListeners();
+    _sessionVersion++;
     _phone = normalizedPhone;
     _isAuthenticated = true;
+    await _sessionStore.save(AuthSession(phone: normalizedPhone));
     _isLoggingIn = false;
     notifyListeners();
   }
 
-  void logout() {
+  Future<void> logout() async {
+    _sessionVersion++;
     _phone = null;
     _isAuthenticated = false;
     _isSendingCode = false;
     _isLoggingIn = false;
+    await _sessionStore.clear();
     notifyListeners();
   }
 

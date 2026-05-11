@@ -1,12 +1,18 @@
 import 'package:face_swap_video/features/auth/providers/auth_provider.dart';
+import 'package:face_swap_video/features/auth/services/auth_session_store.dart';
 import 'package:face_swap_video/features/auth/services/device_phone_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   const channel = MethodChannel('test/device_phone');
 
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
 
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -104,10 +110,57 @@ void main() {
     final provider = AuthProvider();
 
     await provider.loginWithSms(phone: '19999999999', code: '123456');
-    provider.logout();
+    await provider.logout();
 
     expect(provider.isAuthenticated, isFalse);
     expect(provider.phone, isNull);
     expect(provider.displayPhone, '未登录');
   });
+
+  test('loads saved session from local app storage', () async {
+    final store = _FakeAuthSessionStore(
+      initialSession: const AuthSession(phone: '17700008888'),
+    );
+    final provider = AuthProvider(sessionStore: store);
+
+    await provider.loadSavedSession();
+
+    expect(provider.isAuthenticated, isTrue);
+    expect(provider.phone, '17700008888');
+    expect(provider.displayPhone, '尾号 8888');
+  });
+
+  test('persists login locally and clears it on logout', () async {
+    final store = _FakeAuthSessionStore();
+    final provider = AuthProvider(sessionStore: store);
+
+    await provider.loginWithSms(phone: '18800009999', code: '123456');
+
+    expect(store.savedSession?.phone, '18800009999');
+
+    await provider.logout();
+
+    expect(store.savedSession, isNull);
+    expect(provider.isAuthenticated, isFalse);
+  });
+}
+
+class _FakeAuthSessionStore implements AuthSessionStore {
+  _FakeAuthSessionStore({AuthSession? initialSession})
+    : savedSession = initialSession;
+
+  AuthSession? savedSession;
+
+  @override
+  Future<AuthSession?> load() async => savedSession;
+
+  @override
+  Future<void> save(AuthSession session) async {
+    savedSession = session;
+  }
+
+  @override
+  Future<void> clear() async {
+    savedSession = null;
+  }
 }
