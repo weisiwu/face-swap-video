@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -23,12 +24,33 @@ FF_EXECUTION_PROVIDERS = os.environ.get("FF_EXECUTION_PROVIDERS", "coreml")
 FF_PROCESSORS = os.environ.get("FF_PROCESSORS", "face_swapper")
 FF_FACE_SWAPPER_MODEL = os.environ.get("FF_FACE_SWAPPER_MODEL", "inswapper_128_fp16")
 FF_EXECUTION_THREAD_COUNT = os.environ.get("FF_EXECUTION_THREAD_COUNT", "4")
+FF_VIDEO_PROFILE = os.environ.get("FF_VIDEO_PROFILE", "fast").strip().lower()
+if FF_VIDEO_PROFILE in {"high", "quality", "hq"}:
+    FF_VIDEO_PROFILE = "high_quality"
+if FF_VIDEO_PROFILE not in {"fast", "high_quality"}:
+    FF_VIDEO_PROFILE = "fast"
+_PROFILE_DEFAULTS = {
+    "fast": {
+        "target_max_width": "540",
+        "target_fps": "18",
+        "output_video_fps": "18",
+        "output_video_quality": "60",
+    },
+    "high_quality": {
+        "target_max_width": "720",
+        "target_fps": "24",
+        "output_video_fps": "24",
+        "output_video_quality": "70",
+    },
+}
+_PROFILE = _PROFILE_DEFAULTS[FF_VIDEO_PROFILE]
 FF_OUTPUT_VIDEO_PRESET = os.environ.get("FF_OUTPUT_VIDEO_PRESET", "ultrafast")
-FF_OUTPUT_VIDEO_QUALITY = os.environ.get("FF_OUTPUT_VIDEO_QUALITY", "70")
-FF_OUTPUT_VIDEO_FPS = os.environ.get("FF_OUTPUT_VIDEO_FPS", "24")
+FF_OUTPUT_VIDEO_QUALITY = os.environ.get("FF_OUTPUT_VIDEO_QUALITY", _PROFILE["output_video_quality"])
+FF_OUTPUT_VIDEO_FPS = os.environ.get("FF_OUTPUT_VIDEO_FPS", _PROFILE["output_video_fps"])
 FF_OPTIMIZE_TARGET_VIDEO = os.environ.get("FF_OPTIMIZE_TARGET_VIDEO", "1") != "0"
-FF_TARGET_MAX_WIDTH = int(os.environ.get("FF_TARGET_MAX_WIDTH", "720"))
-FF_TARGET_FPS = int(os.environ.get("FF_TARGET_FPS", "24"))
+FF_TARGET_MAX_WIDTH = int(os.environ.get("FF_TARGET_MAX_WIDTH", _PROFILE["target_max_width"]))
+FF_TARGET_FPS = int(os.environ.get("FF_TARGET_FPS", _PROFILE["target_fps"]))
+VIDEO_MAX_WORKERS = max(1, min(int(os.environ.get("VIDEO_MAX_WORKERS", "1")), 4))
 FFMPEG_SEARCH_PATHS = [
     os.path.expanduser("~/miniconda3/bin"),
     "/opt/miniconda3/bin",
@@ -43,8 +65,9 @@ os.environ["PATH"] = os.pathsep.join(
 OUTPUT_BASE = Path(os.environ.get("FF_OUTPUT_DIR", os.path.join(FF_DIR, ".api_output")))
 OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
 JOBS: dict[str, dict] = {}
+JOB_PROCESSES: dict[str, subprocess.Popen] = {}
 JOBS_LOCK = threading.Lock()
-VIDEO_JOB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="facefusion-video")
+VIDEO_JOB_EXECUTOR = ThreadPoolExecutor(max_workers=VIDEO_MAX_WORKERS, thread_name_prefix="facefusion-video")
 
 # ── App ─────────────────────────────────────────────────────────────────
 try:
@@ -71,17 +94,46 @@ app.add_middleware(
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
-def _run_facefusion(args: list[str], timeout: int = 600) -> tuple[int, str, str]:
+def _run_facefusion(args: list[str], timeout: int = 600, job_id: str | None = None) -> tuple[int, str, str]:
     """Run FaceFusion headless-run and return (exit_code, stdout, stderr)."""
     cmd = [FF_PYTHON, "facefusion.py", "headless-run"] + args
-    result = subprocess.run(
+    process = subprocess.Popen(
         cmd,
         cwd=FF_DIR,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
+        start_new_session=True,
     )
-    return result.returncode, result.stdout, result.stderr
+    if job_id:
+        with JOBS_LOCK:
+            JOB_PROCESSES[job_id] = process
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return process.returncode, stdout, stderr
+    except subprocess.TimeoutExpired:
+        _terminate_process(process)
+        stdout, stderr = process.communicate()
+        return 124, stdout, stderr or "FaceFusion timed out"
+    finally:
+        if job_id:
+            with JOBS_LOCK:
+                if JOB_PROCESSES.get(job_id) is process:
+                    JOB_PROCESSES.pop(job_id, None)
+
+
+def _terminate_process(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=10)
+    except Exception:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
 
 
 def _save_upload(upload: UploadFile, prefix: str) -> tuple[Path, int, float]:
@@ -192,7 +244,7 @@ def _copy_audio_from_target(target_path: Path, swapped_path: Path) -> Path:
     return swapped_path
 
 
-def _run_video_swap(src_path: Path, tgt_path: Path, raw_out_path: Path) -> Path:
+def _run_video_swap(job_id: str, src_path: Path, tgt_path: Path, raw_out_path: Path) -> Path:
     prepared_tgt_path = _preprocess_target_video(tgt_path)
     started_at = time.perf_counter()
     exit_code, stdout, stderr = _run_facefusion([
@@ -207,7 +259,7 @@ def _run_video_swap(src_path: Path, tgt_path: Path, raw_out_path: Path) -> Path:
         "--output-video-quality", FF_OUTPUT_VIDEO_QUALITY,
         "--output-video-fps", FF_OUTPUT_VIDEO_FPS,
         "--log-level", "warn",
-    ], timeout=1800)
+    ], timeout=1800, job_id=job_id)
     print(f"[video-swap] facefusion finished in {time.perf_counter() - started_at:.2f}s exit={exit_code}", flush=True)
 
     if exit_code != 0 or not raw_out_path.exists():
@@ -225,10 +277,14 @@ def _run_video_swap(src_path: Path, tgt_path: Path, raw_out_path: Path) -> Path:
 
 
 def _process_video_job(job_id: str, src_path: Path, tgt_path: Path, raw_out_path: Path) -> None:
+    if _get_job(job_id).get("status") == "cancelled":
+        return
     _set_job(job_id, status="processing", processing_started_at=time.time(), updated_at=time.time())
     started_at = time.perf_counter()
     try:
-        final_path = _run_video_swap(src_path, tgt_path, raw_out_path)
+        final_path = _run_video_swap(job_id, src_path, tgt_path, raw_out_path)
+        if _get_job(job_id).get("status") == "cancelled":
+            return
         _set_job(
             job_id,
             status="completed",
@@ -237,7 +293,8 @@ def _process_video_job(job_id: str, src_path: Path, tgt_path: Path, raw_out_path
             updated_at=time.time(),
         )
     except Exception as exc:
-        _set_job(job_id, status="failed", error=str(exc), updated_at=time.time())
+        if _get_job(job_id).get("status") != "cancelled":
+            _set_job(job_id, status="failed", error=str(exc), updated_at=time.time())
     finally:
         for p in [src_path, tgt_path]:
             try:
@@ -257,6 +314,12 @@ async def health():
         "version": "1.0.0",
         "facefusion_path": FF_DIR,
         "execution_providers": FF_EXECUTION_PROVIDERS,
+        "video_profile": FF_VIDEO_PROFILE,
+        "video_max_workers": VIDEO_MAX_WORKERS,
+        "target_max_width": FF_TARGET_MAX_WIDTH,
+        "target_fps": FF_TARGET_FPS,
+        "output_video_fps": FF_OUTPUT_VIDEO_FPS,
+        "output_video_quality": FF_OUTPUT_VIDEO_QUALITY,
     }
 
 
@@ -335,7 +398,7 @@ async def swap_video(
     out_path = _make_output_path("vid_swap", ".mp4")
 
     try:
-        final_path = _run_video_swap(src_path, tgt_path, out_path)
+        final_path = _run_video_swap("sync", src_path, tgt_path, out_path)
 
         return FileResponse(
             final_path,
@@ -407,6 +470,25 @@ async def swap_status(job_id: str):
         "upload_save_seconds": job.get("upload_save_seconds"),
         "processing_seconds": job.get("processing_seconds"),
     }
+
+
+@app.post("/api/swap/cancel/{job_id}")
+async def cancel_swap_job(job_id: str):
+    """Cancel a queued or processing video swap job."""
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    status = job.get("status")
+    if status in {"completed", "failed", "cancelled"}:
+        return {"job_id": job_id, "status": status}
+
+    process = None
+    with JOBS_LOCK:
+        process = JOB_PROCESSES.get(job_id)
+    if process is not None:
+        _terminate_process(process)
+    _set_job(job_id, status="cancelled", error="Job cancelled by client", updated_at=time.time())
+    return {"job_id": job_id, "status": "cancelled"}
 
 
 @app.get("/api/swap/result/{job_id}")
