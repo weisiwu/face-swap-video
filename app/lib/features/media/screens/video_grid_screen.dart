@@ -1,8 +1,10 @@
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
-import '../utils/album_display_name.dart';
+import 'package:face_swap_video/features/media/utils/album_display_name.dart';
+import 'package:face_swap_video/features/media/widgets/media_album_picker_sheet.dart';
+import 'package:face_swap_video/features/media/widgets/media_permission_denied.dart';
+import 'package:face_swap_video/features/media/widgets/video_tile.dart';
 
 /// 视频网格选择器
 /// 与 PhotoGridScreen 同架构，筛选视频、支持切换相册/文件夹、3 列网格、单选返回路径
@@ -115,98 +117,14 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
   Future<void> _showAlbumPicker() async {
     if (_albums.isEmpty) return;
 
-    final selected = await showModalBottomSheet<AssetPathEntity>(
+    final selected = await showMediaAlbumPicker(
       context: context,
-      backgroundColor: const Color(0xFF15111F),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 42,
-                height: 4,
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 10, 20, 14),
-                child: Row(
-                  children: [
-                    Icon(Icons.folder_rounded, color: Color(0xFF3B82F6)),
-                    SizedBox(width: 10),
-                    Text(
-                      '切换视频文件夹',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: _albums.length,
-                  separatorBuilder: (context, index) => Divider(
-                    height: 1,
-                    color: Colors.white.withValues(alpha: 0.06),
-                  ),
-                  itemBuilder: (context, index) {
-                    final album = _albums[index];
-                    final isSelected = album.id == _selectedAlbum?.id;
-                    return FutureBuilder<int>(
-                      future: album.assetCountAsync,
-                      builder: (context, snapshot) {
-                        final count = snapshot.data;
-                        return ListTile(
-                          leading: Icon(
-                            isSelected
-                                ? Icons.check_circle_rounded
-                                : Icons.folder_outlined,
-                            color: isSelected
-                                ? const Color(0xFF3B82F6)
-                                : Colors.white.withValues(alpha: 0.55),
-                          ),
-                          title: Text(
-                            displayAlbumName(
-                              album.name,
-                              includeVideoFolders: true,
-                            ),
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: isSelected
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                            ),
-                          ),
-                          subtitle: count == null
-                              ? null
-                              : Text(
-                                  '$count 个视频',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.4),
-                                  ),
-                                ),
-                          onTap: () => Navigator.of(context).pop(album),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+      albums: _albums,
+      selectedAlbum: _selectedAlbum,
+      title: '切换视频文件夹',
+      countLabel: '视频',
+      accentColor: const Color(0xFF3B82F6),
+      includeVideoFolders: true,
     );
 
     if (selected != null) {
@@ -222,7 +140,7 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
   }
 
   Future<void> _pickVideoFromFileManager() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.video,
       allowMultiple: false,
     );
@@ -230,13 +148,6 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
     if (path != null && path.isNotEmpty && mounted) {
       Navigator.of(context).pop(path);
     }
-  }
-
-  // 格式化时长
-  String _formatDuration(int seconds) {
-    final m = seconds ~/ 60;
-    final s = seconds % 60;
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -439,134 +350,18 @@ class _VideoGridScreenState extends State<VideoGridScreen> {
       ),
       itemCount: _videos.length,
       itemBuilder: (context, index) {
-        return _buildVideoTile(_videos[index]);
+        final video = _videos[index];
+        return VideoTile(asset: video, onTap: () => _onVideoTap(video));
       },
     );
   }
 
-  Widget _buildVideoTile(AssetEntity asset) {
-    return GestureDetector(
-      onTap: () => _onVideoTap(asset),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 缩略图
-          FutureBuilder<Uint8List?>(
-            future: asset.thumbnailDataWithSize(
-              const ThumbnailSize(300, 300),
-              format: ThumbnailFormat.jpeg,
-            ),
-            builder: (context, snapshot) {
-              if (snapshot.hasData && snapshot.data != null) {
-                return Image.memory(
-                  snapshot.data!,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
-                );
-              }
-              return Container(color: Colors.white.withValues(alpha: 0.03));
-            },
-          ),
-          // 时长标签
-          Positioned(
-            right: 4,
-            bottom: 4,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                _formatDuration(asset.duration),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-          // 播放图标
-          Center(
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.5),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.play_arrow_rounded,
-                color: Colors.white,
-                size: 20,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPermissionDenied() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.video_library_outlined,
-              size: 64,
-              color: Colors.white.withValues(alpha: 0.2),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              _permissionError ?? '需要相册访问权限',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              '请在系统设置中授予相册访问权限',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.white.withValues(alpha: 0.4),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 30),
-            GestureDetector(
-              onTap: _requestAndLoad,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 14,
-                ),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF3B82F6), Color(0xFF60A5FA)],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text(
-                  '重新授权',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return MediaPermissionDenied(
+      icon: Icons.video_library_outlined,
+      message: _permissionError ?? '需要相册访问权限',
+      gradientColors: const [Color(0xFF3B82F6), Color(0xFF60A5FA)],
+      onRetry: _requestAndLoad,
     );
   }
 }

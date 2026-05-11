@@ -1,8 +1,10 @@
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
-import '../utils/album_display_name.dart';
+import 'package:face_swap_video/features/media/utils/album_display_name.dart';
+import 'package:face_swap_video/features/media/widgets/media_album_picker_sheet.dart';
+import 'package:face_swap_video/features/media/widgets/media_permission_denied.dart';
+import 'package:face_swap_video/features/media/widgets/photo_tile.dart';
 
 /// 照片网格选择器
 /// 直接获取设备相册权限，以 3 列网格展示照片，支持切换相册/文件夹，单选一张后返回路径
@@ -115,95 +117,13 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
   Future<void> _showAlbumPicker() async {
     if (_albums.isEmpty) return;
 
-    final selected = await showModalBottomSheet<AssetPathEntity>(
+    final selected = await showMediaAlbumPicker(
       context: context,
-      backgroundColor: const Color(0xFF15111F),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 42,
-                height: 4,
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 10, 20, 14),
-                child: Row(
-                  children: [
-                    Icon(Icons.folder_rounded, color: Color(0xFFEC4899)),
-                    SizedBox(width: 10),
-                    Text(
-                      '切换照片文件夹',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: _albums.length,
-                  separatorBuilder: (context, index) => Divider(
-                    height: 1,
-                    color: Colors.white.withValues(alpha: 0.06),
-                  ),
-                  itemBuilder: (context, index) {
-                    final album = _albums[index];
-                    final isSelected = album.id == _selectedAlbum?.id;
-                    return FutureBuilder<int>(
-                      future: album.assetCountAsync,
-                      builder: (context, snapshot) {
-                        final count = snapshot.data;
-                        return ListTile(
-                          leading: Icon(
-                            isSelected
-                                ? Icons.check_circle_rounded
-                                : Icons.folder_outlined,
-                            color: isSelected
-                                ? const Color(0xFFEC4899)
-                                : Colors.white.withValues(alpha: 0.55),
-                          ),
-                          title: Text(
-                            displayAlbumName(album.name),
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: isSelected
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                            ),
-                          ),
-                          subtitle: count == null
-                              ? null
-                              : Text(
-                                  '$count 张照片',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.4),
-                                  ),
-                                ),
-                          onTap: () => Navigator.of(context).pop(album),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+      albums: _albums,
+      selectedAlbum: _selectedAlbum,
+      title: '切换照片文件夹',
+      countLabel: '照片',
+      accentColor: const Color(0xFFEC4899),
     );
 
     if (selected != null) {
@@ -220,7 +140,7 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
   }
 
   Future<void> _pickPhotoFromFileManager() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.image,
       allowMultiple: false,
     );
@@ -424,92 +344,20 @@ class _PhotoGridScreenState extends State<PhotoGridScreen> {
       ),
       itemCount: _photos.length,
       itemBuilder: (context, index) {
-        return _buildPhotoTile(_photos[index]);
+        return PhotoTile(
+          asset: _photos[index],
+          onTap: () => _onPhotoTap(_photos[index]),
+        );
       },
     );
   }
 
-  Widget _buildPhotoTile(AssetEntity asset) {
-    return GestureDetector(
-      onTap: () => _onPhotoTap(asset),
-      child: FutureBuilder<Uint8List?>(
-        future: asset.thumbnailDataWithSize(
-          const ThumbnailSize(300, 300),
-          format: ThumbnailFormat.jpeg,
-        ),
-        builder: (context, snapshot) {
-          if (snapshot.hasData && snapshot.data != null) {
-            return Image.memory(
-              snapshot.data!,
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-            );
-          }
-          return Container(color: Colors.white.withValues(alpha: 0.03));
-        },
-      ),
-    );
-  }
-
   Widget _buildPermissionDenied() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.photo_library_outlined,
-              size: 64,
-              color: Colors.white.withValues(alpha: 0.2),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              _permissionError ?? '需要相册访问权限',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              '请在系统设置中授予相册访问权限',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.white.withValues(alpha: 0.4),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 30),
-            GestureDetector(
-              onTap: _requestAndLoad,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 14,
-                ),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFEC4899), Color(0xFFF472B6)],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text(
-                  '重新授权',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return MediaPermissionDenied(
+      icon: Icons.photo_library_outlined,
+      message: _permissionError ?? '需要相册访问权限',
+      gradientColors: const [Color(0xFFEC4899), Color(0xFFF472B6)],
+      onRetry: _requestAndLoad,
     );
   }
 }

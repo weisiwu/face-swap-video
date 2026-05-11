@@ -1,4 +1,4 @@
-import 'package:face_swap_video/utils/app_lifecycle_background.dart';
+import 'package:face_swap_video/core/utils/app_lifecycle_background.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 

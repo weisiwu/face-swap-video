@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:face_swap_video/utils/album_display_name.dart';
+import 'package:face_swap_video/features/media/utils/album_display_name.dart';
 
 void main() {
   group('displayAlbumName', () {

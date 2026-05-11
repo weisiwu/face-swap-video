@@ -1,14 +1,17 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import '../services/api_service.dart';
-import '../services/notification_service.dart';
-import '../utils/media_file_types.dart';
-import '../utils/selected_file_name.dart';
+import 'package:face_swap_video/features/generation/services/api_service.dart';
+import 'package:face_swap_video/core/services/notification_service.dart';
+import 'package:face_swap_video/features/media/utils/media_file_types.dart';
+import 'package:face_swap_video/features/media/utils/selected_file_name.dart';
+import 'package:face_swap_video/features/generation/utils/transfer_progress_label.dart';
 
 enum GenerationStatus { idle, ready, processing, completed, failed }
 
 class GenerationProvider extends ChangeNotifier {
-  final ApiService _api = ApiService();
+  GenerationProvider({ApiService? api}) : _api = api ?? ApiService();
+
+  final ApiService _api;
 
   String? _videoPath;
   String? _faceImagePath;
@@ -32,6 +35,9 @@ class GenerationProvider extends ChangeNotifier {
   bool get isAppInBackground => _isAppInBackground;
   bool get isBackgroundConversionActive =>
       _status == GenerationStatus.processing && _isAppInBackground;
+  bool get hasSelectedMaterial => _videoPath != null || _faceImagePath != null;
+  bool get shouldConfirmBeforeExit =>
+      _status == GenerationStatus.processing || hasSelectedMaterial;
 
   bool get canSubmit =>
       _hasRequiredInputs && _status != GenerationStatus.processing;
@@ -83,13 +89,27 @@ class GenerationProvider extends ChangeNotifier {
       }
 
       // Phase 2: Upload & swap (bulk of the work)
-      _updateProgress(0.15, '上传素材中...', runId: runId);
+      _updateProgress(0.15, uploadMaterialBaseLabel, runId: runId);
+
+      void handleUploadProgress(int sentBytes, int totalBytes) {
+        if (!_isActiveRun(runId)) return;
+        final uploadFraction = totalBytes > 0 ? sentBytes / totalBytes : 0.0;
+        _updateProgress(
+          0.15 + uploadFraction.clamp(0.0, 1.0) * 0.10,
+          formatUploadProgressLabel(
+            uploadedBytes: sentBytes,
+            totalBytes: totalBytes,
+          ),
+          runId: runId,
+        );
+      }
 
       String resultPath;
       if (isVideoFilePath(_videoPath!)) {
         final jobId = await _api.swapVideoJob(
           sourcePath: _faceImagePath!,
           targetPath: _videoPath!,
+          onUploadProgress: handleUploadProgress,
         );
         if (!_isActiveRun(runId)) return;
         _updateProgress(0.25, '素材已上传，服务器处理中...', runId: runId);
@@ -109,6 +129,7 @@ class GenerationProvider extends ChangeNotifier {
         resultPath = await _api.swapFace(
           sourcePath: _faceImagePath!,
           targetPath: _videoPath!,
+          onUploadProgress: handleUploadProgress,
           onProgress: (downloadProgress) {
             // Map download progress (0-1) to overall (0.2-0.95)
             _updateProgress(
@@ -166,7 +187,13 @@ class GenerationProvider extends ChangeNotifier {
 
   void _updateProgress(double value, String step, {int? runId}) {
     if (runId != null && !_isActiveRun(runId)) return;
-    _progress = value;
+
+    final nextProgress = value.clamp(0.0, 1.0).toDouble();
+    if (_status == GenerationStatus.processing && nextProgress < _progress) {
+      return;
+    }
+
+    _progress = nextProgress;
     _currentStep = step;
     notifyListeners();
   }
@@ -193,6 +220,14 @@ class GenerationProvider extends ChangeNotifier {
     _faceImagePath = null;
     _status = GenerationStatus.idle;
     _clearTransientResultState();
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  void debugSetProcessingForTest() {
+    _status = GenerationStatus.processing;
+    _progress = 0.2;
+    _currentStep = '测试处理中';
     notifyListeners();
   }
 

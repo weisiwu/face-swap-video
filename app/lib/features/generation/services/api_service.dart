@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 
-import '../utils/media_file_types.dart';
+import 'package:face_swap_video/features/media/utils/media_file_types.dart';
+
+typedef UploadProgressCallback = void Function(int sentBytes, int totalBytes);
 
 class ApiService {
   // Cloudflare Tunnel URL — auto-synced from server
@@ -47,18 +49,21 @@ class ApiService {
   /// Swap face in an image
   /// [sourcePath] - local path to the source face image
   /// [targetPath] - local path to the target image/video
-  /// [onProgress] - callback (0.0 to 1.0) for upload progress
+  /// [onProgress] - callback (0.0 to 1.0) for result download progress.
+  /// [onUploadProgress] - callback with uploaded bytes and multipart payload size.
   /// Returns the downloaded file path of the result.
   Future<String> swapFace({
     required String sourcePath,
     required String targetPath,
     void Function(double progress)? onProgress,
+    UploadProgressCallback? onUploadProgress,
   }) async {
     final isVideo = isVideoFilePath(targetPath);
     if (isVideo) {
       final jobId = await swapVideoJob(
         sourcePath: sourcePath,
         targetPath: targetPath,
+        onUploadProgress: onUploadProgress,
       );
       return pollSwapJob(jobId: jobId, onProgress: onProgress);
     }
@@ -70,7 +75,10 @@ class ApiService {
     request.files.add(await http.MultipartFile.fromPath('source', sourcePath));
     request.files.add(await http.MultipartFile.fromPath('target', targetPath));
 
-    final streamedResponse = await request.send().timeout(_uploadTimeout);
+    final streamedResponse = await _sendMultipartRequest(
+      request,
+      onUploadProgress: onUploadProgress,
+    ).timeout(_uploadTimeout);
 
     if (streamedResponse.statusCode != 200) {
       final body = await streamedResponse.stream.bytesToString();
@@ -104,6 +112,7 @@ class ApiService {
   Future<String> swapVideoJob({
     required String sourcePath,
     required String targetPath,
+    UploadProgressCallback? onUploadProgress,
   }) async {
     final request = http.MultipartRequest(
       'POST',
@@ -112,7 +121,10 @@ class ApiService {
     request.files.add(await http.MultipartFile.fromPath('source', sourcePath));
     request.files.add(await http.MultipartFile.fromPath('target', targetPath));
 
-    final streamedResponse = await request.send().timeout(_uploadTimeout);
+    final streamedResponse = await _sendMultipartRequest(
+      request,
+      onUploadProgress: onUploadProgress,
+    ).timeout(_uploadTimeout);
     final body = await streamedResponse.stream.bytesToString();
     if (streamedResponse.statusCode != 200) {
       throw ApiException(
@@ -213,6 +225,88 @@ class ApiService {
     }
     await sink.close();
     return outputPath;
+  }
+
+  Future<http.StreamedResponse> _sendMultipartRequest(
+    http.MultipartRequest request, {
+    UploadProgressCallback? onUploadProgress,
+  }) async {
+    final client = http.Client();
+    final totalBytes = request.contentLength;
+    final byteStream = request.finalize();
+    final streamedRequest = http.StreamedRequest(request.method, request.url)
+      ..headers.addAll(request.headers)
+      ..followRedirects = request.followRedirects
+      ..maxRedirects = request.maxRedirects
+      ..persistentConnection = request.persistentConnection
+      ..contentLength = totalBytes;
+
+    unawaited(
+      streamedRequest.sink
+          .addStream(
+            _trackUploadProgress(
+              byteStream,
+              totalBytes: totalBytes,
+              onUploadProgress: onUploadProgress,
+            ),
+          )
+          .then((_) => streamedRequest.sink.close())
+          .catchError((Object error, StackTrace stackTrace) {
+            streamedRequest.sink.addError(error, stackTrace);
+          }),
+    );
+
+    try {
+      final response = await client.send(streamedRequest);
+      return _closeClientWhenDone(response, client);
+    } catch (_) {
+      client.close();
+      rethrow;
+    }
+  }
+
+  Stream<List<int>> _trackUploadProgress(
+    http.ByteStream stream, {
+    required int totalBytes,
+    UploadProgressCallback? onUploadProgress,
+  }) async* {
+    var sentBytes = 0;
+    onUploadProgress?.call(sentBytes, totalBytes);
+    await for (final chunk in stream) {
+      sentBytes += chunk.length;
+      onUploadProgress?.call(sentBytes, totalBytes);
+      yield chunk;
+    }
+  }
+
+  http.StreamedResponse _closeClientWhenDone(
+    http.StreamedResponse response,
+    http.Client client,
+  ) {
+    final closingStream = response.stream.transform(
+      StreamTransformer<List<int>, List<int>>.fromHandlers(
+        handleData: (chunk, sink) => sink.add(chunk),
+        handleError: (error, stackTrace, sink) {
+          client.close();
+          sink.addError(error, stackTrace);
+        },
+        handleDone: (sink) {
+          client.close();
+          sink.close();
+        },
+      ),
+    );
+
+    return http.StreamedResponse(
+      closingStream,
+      response.statusCode,
+      contentLength: response.contentLength,
+      request: response.request,
+      headers: response.headers,
+      isRedirect: response.isRedirect,
+      persistentConnection: response.persistentConnection,
+      reasonPhrase: response.reasonPhrase,
+    );
   }
 
   bool _isTransientNetworkError(Object error) {

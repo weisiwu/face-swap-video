@@ -18,7 +18,7 @@ class NotificationService {
       '@mipmap/ic_launcher',
     );
     const settings = InitializationSettings(android: androidSettings);
-    await _plugin.initialize(settings);
+    await _plugin.initialize(settings: settings);
 
     final androidPlugin = _plugin
         .resolvePlatformSpecificImplementation<
@@ -55,10 +55,10 @@ class NotificationService {
   }) async {
     await _ensureNotificationPermission();
     return _plugin.show(
-      id,
-      title,
-      body,
-      NotificationDetails(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _channel.id,
           _channel.name,

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:face_swap_video/utils/selected_file_name.dart';
+import 'package:face_swap_video/features/media/utils/selected_file_name.dart';
 
 void main() {
   group('selectedFileName', () {

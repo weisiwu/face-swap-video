@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:face_swap_video/utils/media_file_types.dart';
+import 'package:face_swap_video/features/media/utils/media_file_types.dart';
 
 void main() {
   group('isVideoFilePath', () {

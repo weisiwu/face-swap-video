@@ -1,35 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'providers/generation_provider.dart';
-import 'screens/generation_screen.dart';
-import 'screens/splash_screen.dart';
-import 'services/notification_service.dart';
-import 'utils/app_lifecycle_background.dart';
+
+import 'package:face_swap_video/features/auth/providers/auth_provider.dart';
+import 'package:face_swap_video/features/generation/providers/generation_provider.dart';
+import 'package:face_swap_video/features/auth/screens/auth_gate.dart';
+import 'package:face_swap_video/core/screens/splash_screen.dart';
+import 'package:face_swap_video/core/services/notification_service.dart';
+import 'package:face_swap_video/core/utils/app_lifecycle_background.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NotificationService.initialize();
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => GenerationProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => GenerationProvider()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+      ],
       child: const FaceSwapApp(),
     ),
   );
 }
 
 class FaceSwapApp extends StatefulWidget {
-  const FaceSwapApp({super.key});
+  const FaceSwapApp({super.key, this.showSplashOnLaunch = true});
+
+  final bool showSplashOnLaunch;
 
   @override
   State<FaceSwapApp> createState() => _FaceSwapAppState();
 }
 
 class _FaceSwapAppState extends State<FaceSwapApp> with WidgetsBindingObserver {
-  bool _showSplash = true;
+  late bool _showSplash;
 
   @override
   void initState() {
     super.initState();
+    _showSplash = widget.showSplashOnLaunch;
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -51,7 +59,7 @@ class _FaceSwapAppState extends State<FaceSwapApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '视频换脸',
+      title: '爆肝AI',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -74,7 +82,7 @@ class _FaceSwapAppState extends State<FaceSwapApp> with WidgetsBindingObserver {
                   setState(() => _showSplash = false);
                 },
               )
-            : const GenerationScreen(key: ValueKey('generation')),
+            : const AuthGate(key: ValueKey('auth-gate')),
       ),
     );
   }
