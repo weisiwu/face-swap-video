@@ -2,7 +2,7 @@
 
 > 🔴 **Android App 项目 — 所有开发、构建、截图必须在 Android 端完成**
 > minSdkVersion: Android 10 (API 29)
-> 最后更新: 2026-05-10
+> 最后更新: 2026-05-11
 
 ## ⚠️ 强依赖
 
@@ -27,9 +27,10 @@
 - 生成方式：视频检测与换脸生成依赖远端接口，移动端不承担重模型推理。
 - 交互：打开 App 直接进入生成页面；用户选择/上传素材后点击提交，然后等待远端生成结果。
 - 后台转换：点击转换时不要直接进入后台转换模式；App 在前台时仍然正常转换并展示前台进度，只有用户把应用切换到后台后，才执行后台转换/后台轮询逻辑。
-- 版本号：应用底部展示版本号；每次添加功能升级 minor，每次修复 bug 升级 patch；第一次发布时 major 从 0 升级到 1。
+- 版本号：应用底部展示版本号；从 0.7.3 开始继续迭代；每次添加功能升级 minor，每次修复 bug 升级 patch；后续生成的 APK 文件名使用 `爆肝AI-v版本号[-ABI]-构建类型.apk`。
 - 风格：极简，少页面、少配置、少解释，优先把主流程跑通。
 - 合规：仅处理授权素材，默认展示 AI 生成/换脸提示。
+- 登录：启动页后直接进入生成页；未登录用户可以先选择素材，只有点击“生成/一键开始换脸”时才弹出登录页，登录成功后返回生成页，主界面保留轻量账号入口。
 
 ## 当前阶段
 
@@ -42,6 +43,7 @@
 | 04 生成页主流程 | ✅ 已接入 Provider 状态、前台进度、取消/失败/完成弹框 |
 | 05 结果页/保存分享 | 🔨 已有完成预览与保存入口，分享能力待产品确认 |
 | 06 合规提示与授权确认 | ✅ 已内嵌到生成页底部 |
+| 07 登录/注册 | ✅ 已接入 Mock 手机号验证码登录/注册，登录页提供可选读取本机号码辅助回填；任意非空手机号与验证码可通过，后续接真实短信接口 |
 
 ## 目录结构
 
@@ -52,10 +54,11 @@ apps/face-swap-video/
 ├── app/                     # Flutter Android App
 │   ├── lib/
 │   │   ├── main.dart
-│   │   ├── providers/           # 生成任务状态、进度与前后台生命周期状态
-│   │   ├── screens/             # 启动页、生成页、素材网格页
-│   │   ├── services/            # 远端 API 与本地通知服务
-│   │   └── utils/               # 纯工具函数：媒体类型、相册名称、生命周期判定、文件名展示
+│   │   ├── core/                # 跨功能通用：通知服务、生命周期工具、App Logo、开屏动画
+│   │   └── features/
+│   │       ├── auth/            # Mock 手机号登录：provider、登录页、设备手机号辅助服务
+│   │       ├── generation/      # 生成页、远端 API、任务状态、进度/结果/底部组件
+│   │       └── media/           # 照片/视频选择页、相册命名、媒体类型与网格组件
 │   ├── test/                    # Flutter/Dart 测试
 │   └── android/app/build.gradle.kts  (minSdk = 29)
 ├── scripts/                 # 工具脚本（在项目根 scripts/）
@@ -69,12 +72,13 @@ apps/face-swap-video/
 | 工具 | 路径 |
 |---|---|
 | Android 截图 | `scripts/screenshot-android.py` |
+| Release APK 打包 | `scripts/build-release-apks.sh`，输出 `releases/爆肝AI-v版本号-ABI-release.apk` |
 | ASCII 编译路径 | `/tmp/zfj` → `~/Desktop/致富经` |
 | Skill: 截图 | `android-screenshot` |
 
 ## 阻塞点
 
-- 远端接口已按当前客户端实现固化为：`/api/health`、`/api/swap/image`、`/api/swap/video/job`、`/api/swap/status/{jobId}`、`/api/swap/result/{jobId}`；后续若服务端协议变化，需要同步更新 `app/lib/services/api_service.dart` 与测试/文档。
+- 远端接口已按当前客户端实现固化为：`/api/health`、`/api/swap/image`、`/api/swap/video/job`、`/api/swap/status/{jobId}`、`/api/swap/result/{jobId}`；后续若服务端协议变化，需要同步更新 `app/lib/features/generation/services/api_service.dart` 与测试/文档。
 - 尚未提供授权测试素材。
 - 分享能力仍待产品确认；当前重点保持完成预览、保存入口与前后台通知链路稳定。
 

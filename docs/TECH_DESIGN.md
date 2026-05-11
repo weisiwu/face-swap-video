@@ -1,152 +1,172 @@
-# 技术方案设计：face-swap-video
+# 技术方案设计：爆肝AI 视频换脸 Android App
 
-## 1. 总体架构
+## 1. 当前架构
 
 ```text
-CLI / GUI
+Android Flutter App
   ↓
-Config Loader
+GenerationScreen（素材选择、账号入口、进度/结果 UI）
   ↓
-Safety Gate（授权/水印/审计）
+GenerationProvider（生成状态机、前后台生命周期、进度）
   ↓
-Video IO（抽帧/合成）
+ApiService（远端 FaceFusion API）
   ↓
-Face Detection（检测）
-  ↓
-Face Tracking（轨迹）
-  ↓
-Face Swap Engine（换脸）
-  ↓
-Post Process（水印/修复/编码）
-  ↓
-Report & Manifest
+https://facefusion.baoganai.com
 ```
 
-## 2. 推荐技术栈
+登录为独立轻量状态：
 
-| 模块 | MVP | 后续可选 |
+```text
+SplashScreen
+  ↓
+AuthGate（当前默认进入 GenerationScreen）
+  ↓
+GenerationScreen
+  ├─ 未登录点击生成 → LoginScreen
+  └─ 登录成功返回 → startGeneration
+```
+
+## 2. 技术栈
+
+| 模块 | 当前选择 |
+|---|---|
+| App 框架 | Flutter 3.41.7 |
+| 语言 | Dart |
+| 状态管理 | Provider / ChangeNotifier |
+| Android minSdk | API 29 |
+| 网络 | package:http multipart upload + stream download |
+| 本地媒体 | file_picker、photo_manager、video_thumbnail、video_player |
+| 通知 | flutter_local_notifications |
+| 外链 | url_launcher |
+| 测试 | flutter_test |
+
+## 3. 关键模块
+
+### 3.1 `main.dart`
+
+- 初始化 `NotificationService`。
+- 注入 `GenerationProvider` 和 `AuthProvider`。
+- 展示启动页，启动页结束后进入 `AuthGate`。
+- 监听 App 生命周期，把前后台状态同步给 `GenerationProvider`。
+
+### 3.2 `GenerationScreen`
+
+职责：
+
+- 展示品牌头部、素材选择卡片、合规提示、版本号、吸底生成按钮。
+- 处理素材选择入口和结果预览弹窗。
+- 顶部展示轻量账号入口，长按可退出登录。
+- 点击生成时检查登录态；未登录则跳转 `LoginScreen`。
+
+维护约束：
+
+- 不改变主流程：打开 App → 选择素材 → 提交远端任务 → 查看进度/结果。
+- 文件仍偏大，后续应优先拆出进度弹窗、结果弹窗、素材卡片和吸底按钮组件。
+
+### 3.3 `GenerationProvider`
+
+职责：
+
+- 保存源人脸、目标素材、任务状态、错误、结果路径。
+- 调用 `ApiService.swapFace()`。
+- 维护上传、处理、下载进度。
+- 根据生命周期状态区分前台进度与后台等待。
+- 完成后触发本地通知和结果展示。
+
+关键约束：
+
+- 只有 `_status == processing && _isAppInBackground` 时才视为后台转换活跃。
+- 进度不允许明显回退；失败/取消后状态应可恢复。
+
+### 3.4 `ApiService`
+
+默认 Base URL：`https://facefusion.baoganai.com`
+
+当前接口：
+
+| 能力 | 方法 | 路径 |
 |---|---|---|
-| CLI | argparse / typer | Typer + Rich |
-| 配置 | dataclass + JSON | pydantic |
-| 视频处理 | OpenCV / ffmpeg | PyAV |
-| 人脸检测 | InsightFace / RetinaFace | MediaPipe / YOLO-face |
-| 人脸关键点 | InsightFace | 3DDFA |
-| 换脸模型 | 接口预留 | inswapper / SimSwap / FaceFusion 兼容层 |
-| 水印 | OpenCV 绘制 | ffmpeg filter / C2PA 元数据 |
-| 测试 | pytest | 合成视频测试 |
+| 健康检查 | GET | `/api/health` |
+| 图片换脸 | POST multipart | `/api/swap/image` |
+| 创建视频任务 | POST multipart | `/api/swap/video/job` |
+| 查询任务状态 | GET | `/api/swap/status/{jobId}` |
+| 下载任务结果 | GET | `/api/swap/result/{jobId}` |
 
-## 3. 模块设计
+行为：
 
-### 3.1 Safety Gate
+- 图片目标：上传 source/target，服务端同步返回结果流。
+- 视频目标：上传 source/target 创建 job，客户端每 4 秒轮询状态，完成后下载 mp4。
+- 上传和下载均通过 stream 统计进度。
+- 轮询总超时 35 分钟；状态请求超时 15 秒。
 
-文件：`src/face_swap_video/safety.py`
+### 3.5 `AuthProvider` / `LoginScreen`
 
-职责：
+当前实现边界：
 
-- 读取 `consent_manifest.json`；
-- 校验 `source_face` 与 `target_video` 是否在授权范围内；
-- 校验输出是否启用水印；
-- 生成审计字段。
+- Mock 手机号验证码登录，不请求真实后端 Auth API。
+- `sendCode()` 只触发 60 秒倒计时。
+- `loginWithSms()` 校验手机号非空、验证码为 6 位数字，然后设置本地内存登录态。
+- 登录态不持久化，重启 App 后恢复未登录。
+- `DevicePhoneService` 用于在用户主动点击后尝试读取 Android 主卡手机号作为辅助回填。
 
-### 3.2 Config
+后续如接真实账号服务，应新增 `AuthApiService` 和 `AuthStorage`，不要塞进 FaceFusion `ApiService`。
 
-文件：`src/face_swap_video/config.py`
+## 4. 目录结构
 
-职责：
-
-- 定义 `PipelineConfig`；
-- 支持 JSON 读取；
-- 校验路径、输出目录、水印策略。
-
-### 3.3 Pipeline
-
-文件：`src/face_swap_video/pipeline.py`
-
-职责：
-
-- 编排授权校验、视频处理、人脸检测、换脸、输出报告；
-- MVP 阶段先提供接口和 dry-run；
-- 后续逐步接入真实模型。
-
-### 3.4 CLI
-
-文件：`src/face_swap_video/cli.py`
-
-职责：
-
-- `--config` 指定配置文件；
-- `--dry-run` 仅验证配置和授权；
-- 输出清晰的成功/失败信息。
-
-## 4. 数据结构
-
-### 4.1 consent_manifest.json
-
-```json
-{
-  "project": "demo",
-  "operator": "weisiwu",
-  "source_faces": [
-    {
-      "path": "assets/source/person_a.jpg",
-      "subject": "person_a",
-      "consent_type": "explicit",
-      "allowed_use": ["face_swap_test", "internal_preview"],
-      "expires_at": "2026-12-31"
-    }
-  ],
-  "target_videos": [
-    {
-      "path": "assets/input/video.mp4",
-      "allowed_use": ["face_swap_test", "internal_preview"]
-    }
-  ]
-}
+```text
+app/lib/
+├── main.dart
+├── core/
+│   ├── screens/splash_screen.dart
+│   ├── services/notification_service.dart
+│   ├── utils/app_lifecycle_background.dart
+│   └── widgets/                  # App Logo、开屏标识 Painter 等跨功能 UI
+├── features/
+│   ├── auth/
+│   │   ├── providers/auth_provider.dart
+│   │   ├── screens/auth_gate.dart
+│   │   ├── screens/login_screen.dart
+│   │   ├── services/device_phone_service.dart
+│   │   └── widgets/auth_background.dart
+│   ├── generation/
+│   │   ├── providers/generation_provider.dart
+│   │   ├── screens/generation_screen.dart
+│   │   ├── services/api_service.dart
+│   │   ├── utils/transfer_progress_label.dart
+│   │   └── widgets/              # Header、素材卡、进度弹窗、结果预览、吸底 Footer
+│   └── media/
+│       ├── screens/photo_grid_screen.dart
+│       ├── screens/video_grid_screen.dart
+│       ├── utils/                # 相册名称、文件名、媒体类型
+│       └── widgets/              # 相册切换 Sheet、网格 Tile、权限提示
 ```
 
-### 4.2 pipeline_config.json
+## 5. 构建与验证
 
-```json
-{
-  "source_face": "assets/source/person_a.jpg",
-  "target_video": "assets/input/video.mp4",
-  "output_dir": "outputs/demo",
-  "consent_manifest": "consent_manifest.json",
-  "watermark_text": "AI-generated / authorized face swap",
-  "dry_run": true
-}
+项目路径含中文时，必须使用 ASCII 路径构建：
+
+```bash
+cd /tmp/zfj/apps/face-swap-video/app
+flutter analyze
+flutter test
+flutter build apk --debug
 ```
 
-## 5. MVP 实现策略
+Release 脚本：
 
-第一阶段只做“安全可运行骨架”：
+```bash
+cd /tmp/zfj/apps/face-swap-video
+scripts/build-release-apks.sh
+```
 
-1. 完成配置与授权校验；
-2. CLI dry-run 可运行；
-3. 输出 run manifest；
-4. 用 stub pipeline 占位模型调用；
-5. 单元测试覆盖安全边界。
+APK 命名规则：`爆肝AI-v版本号[-ABI]-构建类型.apk`。
 
-第二阶段接入人脸检测：
-
-1. OpenCV 抽帧；
-2. InsightFace 检测；
-3. 保存检测框和关键帧；
-4. 人脸轨迹初版。
-
-第三阶段接入换脸引擎：
-
-1. 兼容开源换脸模型；
-2. 支持单人脸轨迹替换；
-3. 添加水印和报告；
-4. 质量评估和失败回退。
-
-## 6. 风险
+## 6. 风险与后续优化
 
 | 风险 | 应对 |
 |---|---|
-| 未授权换脸滥用 | 强制 consent manifest，默认水印，审计日志 |
-| 模型效果不稳定 | 先做检测/轨迹可视化，再接换脸 |
-| 低清/侧脸失败 | 输出质量评分，低置信度跳过 |
-| 性能慢 | 先离线处理，后续批处理/ GPU 加速 |
-| 法律风险 | 不做公众人物库、不隐藏生成痕迹 |
+| `generation_screen.dart` 继续变大 | 已拆出 header、素材卡片、进度弹窗、结果弹窗、footer；后续新增 UI 优先放入独立 widget |
+| 登录仍是 Mock | 接真实短信 API、token 存储、登录态恢复 |
+| 真实素材链路未充分验证 | 用授权素材跑健康检查→上传→轮询→下载→保存 |
+| 分享/历史记录未定义 | 等产品确认后再补生成记录和系统分享 |
+| 远端接口协议变化 | 同步更新 `ApiService`、测试和本文档 |

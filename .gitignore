@@ -37,6 +37,11 @@ Thumbs.db
 # ── Test media (large files) ──
 test_media/
 
+# ── Release artifacts (generated locally) ──
+releases/
+app/build/app/outputs/flutter-apk/爆肝AI-*.apk
+app/build/app/outputs/flutter-apk/face-swap-video-*.apk
+
 # ── Logs ──
 *.log
 

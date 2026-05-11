@@ -1,80 +1,114 @@
-# face-swap-video Implementation Plan
+# 实施计划：爆肝AI 视频换脸 Android App
 
-> **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
+> 本文档已清理早期 Python CLI / dry-run 方案，仅保留当前 Android App 事实和下一步实施路线。
 
-**Goal:** 构建一个授权素材下的视频人脸检测与换脸工具，先完成安全可运行的 CLI 骨架，再逐步接入人脸检测和换脸模型。
+## 当前已完成
 
-**Architecture:** Python 包结构，CLI 调用 Pipeline。Pipeline 先经过 Safety Gate 校验授权与水印策略，再执行视频处理、检测、换脸和报告输出。MVP 阶段模型调用为 stub/dry-run，优先保证项目边界和测试体系。
+| 模块 | 状态 |
+|---|---|
+| Flutter Android 工程 | ✅ 已完成 |
+| 启动页 → 生成页 | ✅ 已完成 |
+| 素材选择 | ✅ 已完成 |
+| 远端健康检查 | ✅ 已完成 |
+| 图片同步换脸接口 | ✅ 已完成 |
+| 视频任务创建/轮询/结果下载 | ✅ 已完成 |
+| 上传/下载/处理进度 | ✅ 已完成 |
+| 前台进度与后台等待区分 | ✅ 已完成 |
+| 完成通知 | ✅ 已完成 |
+| 结果预览与保存入口 | ✅ 已完成 |
+| Mock 手机号验证码登录 | ✅ 已完成 |
+| 版本号底部展示 | ✅ 已完成 |
 
-**Tech Stack:** Python 3.11+、pytest、dataclass、argparse；后续接入 OpenCV、InsightFace、ffmpeg。
+## P0：真实链路验证
 
----
+目标：用授权测试素材跑完整远端链路，确认当前 App 可真实产出结果。
 
-## Task 1: 完成安全清单校验
+任务：
 
-**Objective:** 实现 consent_manifest 读取与 source/target 授权校验。
+1. 准备授权源人脸图片和目标图片/视频。
+2. 在 Android 真机或模拟器上选择素材。
+3. 验证健康检查、上传、服务端处理、轮询、下载、预览、保存。
+4. 记录失败点：网络、接口返回、状态轮询、下载文件、相册保存。
 
-**Files:**
-- Modify: `src/face_swap_video/safety.py`
-- Test: `tests/test_safety.py`
-
-**Verification:**
-
-```bash
-pytest tests/test_safety.py -q
-```
-
-## Task 2: 完成配置解析
-
-**Objective:** 实现 PipelineConfig 从 JSON 加载，并校验必填字段。
-
-**Files:**
-- Modify: `src/face_swap_video/config.py`
-- Test: `tests/test_config.py`
-
-**Verification:**
+验收：
 
 ```bash
-pytest tests/test_config.py -q
+cd /tmp/zfj/apps/face-swap-video/app
+flutter analyze
+flutter test
+flutter build apk --debug
 ```
 
-## Task 3: 完成 CLI dry-run
+并完成一次真机端到端人工验证。
 
-**Objective:** 让 `python -m face_swap_video --config xxx --dry-run` 能执行授权校验并输出结果。
+## P1：GenerationProvider 状态测试补齐
 
-**Files:**
-- Modify: `src/face_swap_video/cli.py`
-- Modify: `src/face_swap_video/pipeline.py`
+目标：降低核心状态流回归风险。
 
-**Verification:**
+建议新增/补充测试：
+
+- 取消处理中任务后恢复到可再次生成状态。
+- 失败后 dismissError 正确清理错误状态。
+- 前后台切换只影响后台提示，不改变任务本身。
+- 生成完成后再次生成会清理旧结果路径。
+- 上传/下载/轮询阶段进度文案稳定。
+
+涉及文件：
+
+- `app/lib/features/generation/providers/generation_provider.dart`
+- `app/test/generation_provider_test.dart`
+- `app/lib/features/generation/utils/transfer_progress_label.dart`
+- `app/test/transfer_progress_label_test.dart`
+
+## P2：登录注册重新收口
+
+当前事实：登录是 Mock，本地内存态；用户可先选素材，点击生成时才登录。
+
+后续拆分：
+
+1. 明确真实 Auth API：发送验证码、登录/注册、刷新 token、退出登录、当前用户。
+2. 新增 `AuthApiService`，与 FaceFusion `ApiService` 解耦。
+3. 新增安全存储或本地存储，支持重启恢复登录态。
+4. 生成接口带登录态时，再定义 jobId 与 userId 的绑定方式。
+5. 更新登录页测试和主流程 widget 测试。
+
+不再采用“启动页后强制进入登录页”的旧方案，除非产品重新确认。
+
+## P3：拆分 `generation_screen.dart`
+
+目标：降低单文件维护风险。
+
+建议顺序：
+
+1. `widgets/generation_header.dart`
+2. `widgets/material_picker_card.dart`
+3. `widgets/generation_progress_dialog.dart`
+4. `widgets/result_preview_dialog.dart`
+5. `widgets/sticky_generation_footer.dart`
+
+每次拆分要求：
 
 ```bash
-python -m face_swap_video --help
-pytest -q
+cd /tmp/zfj/apps/face-swap-video/app
+flutter analyze
+flutter test
 ```
 
-## Task 4: 接入视频抽帧与人脸检测接口
+如涉及 UI 行为，再跑 debug build 和 Android 截图验证。
 
-**Objective:** 添加 VideoReader 与 FaceDetector 抽象接口，先用 mock/stub 测试。
+## P4：结果记录与分享能力
 
-**Files:**
-- Create: `src/face_swap_video/video.py`
-- Create: `src/face_swap_video/detector.py`
-- Create: `tests/test_detector_contract.py`
+等待产品确认后再实施：
 
-## Task 5: 接入换脸引擎适配层
+- 我的生成记录。
+- 历史结果重新查看。
+- 失败任务重试。
+- 系统分享/微信分享。
 
-**Objective:** 定义 FaceSwapEngine 接口，为后续接入 inswapper/SimSwap/FaceFusion 留出统一边界。
+## P5：文档维护规则
 
-**Files:**
-- Create: `src/face_swap_video/swapper.py`
-- Create: `tests/test_swapper_contract.py`
-
-## Task 6: 输出报告与水印
-
-**Objective:** 生成 report.json/run_manifest.json，并确保默认水印策略不可绕过。
-
-**Files:**
-- Create: `src/face_swap_video/report.py`
-- Modify: `src/face_swap_video/pipeline.py`
-- Test: `tests/test_report.py`
+- `context/project-context.md` 只保留当前事实和下一步，不写长历史。
+- `docs/PRD.md` 记录产品边界和验收标准。
+- `docs/TECH_DESIGN.md` 记录当前真实架构，不保留废弃 CLI 架构。
+- `docs/TEST_CASES.md` 记录 Android App 测试，不保留 Python pytest 用例。
+- 任何远端接口、登录策略、版本规则变化，都要同步更新以上文档。
