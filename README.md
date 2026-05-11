@@ -43,7 +43,7 @@
 | 状态管理 | Provider |
 | Android minSdk | API 29 / Android 10 |
 | 包名 | `com.baoganai.face_swap_video` |
-| 当前版本 | `1.7.0+2017` |
+| 当前版本 | `1.7.1+2018` |
 | 远端服务 | `https://facefusion.baoganai.com` |
 
 性能优化策略：

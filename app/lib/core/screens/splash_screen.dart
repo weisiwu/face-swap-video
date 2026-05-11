@@ -25,7 +25,7 @@ class _AnimeFaceSwapSplashScreenState extends State<AnimeFaceSwapSplashScreen>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2200),
+      duration: const Duration(milliseconds: 3000),
     )..forward();
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed && mounted) {
@@ -57,11 +57,11 @@ class _AnimeFaceSwapSplashScreenState extends State<AnimeFaceSwapSplashScreen>
   }
 
   double _copyOpacity(double t) {
-    // 文案在 800ms 前保持完整可读；淡入/淡出本身保持轻快。
-    const totalMs = 2200.0;
-    const fadeInMs = 180.0;
-    const holdUntilMs = 800.0;
-    const fadeOutMs = 220.0;
+    // 文案至少展示到 1500ms，保证真机上能看清标题和副标题。
+    const totalMs = 3000.0;
+    const fadeInMs = 220.0;
+    const holdUntilMs = 1700.0;
+    const fadeOutMs = 360.0;
 
     final fadeIn = Curves.easeOutCubic.transform(
       (t / (fadeInMs / totalMs)).clamp(0.0, 1.0),

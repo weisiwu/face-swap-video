@@ -1,7 +1,7 @@
 name: face_swap_video
 description: "极简视频换脸 App"
 publish_to: 'none'
-version: 1.7.0+2017
+version: 1.7.1+2018
 
 environment:
   sdk: ^3.11.5

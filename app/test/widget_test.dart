@@ -22,7 +22,7 @@ void main() {
     (WidgetTester tester) async {
       await tester.pumpWidget(_buildTestApp());
 
-      await tester.pump(const Duration(milliseconds: 3000));
+      await tester.pump(const Duration(milliseconds: 3700));
 
       expect(find.text('爆肝AI'), findsOneWidget);
       expect(find.text('源视频'), findsOneWidget);
@@ -32,11 +32,11 @@ void main() {
     },
   );
 
-  testWidgets('Splash copy remains clearly visible for at least 800ms', (
+  testWidgets('Splash copy remains clearly visible for at least 1500ms', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(_buildTestApp());
-    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump(const Duration(milliseconds: 1500));
 
     final copyFinder = find.text('快速换脸');
     expect(copyFinder, findsOneWidget);
@@ -189,7 +189,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(of: stickyFooter, matching: find.text('v1.7.0')),
+        find.descendant(of: stickyFooter, matching: find.text('v1.7.1')),
         findsOneWidget,
       );
     },

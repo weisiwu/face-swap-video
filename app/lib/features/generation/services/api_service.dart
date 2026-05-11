@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 
+import 'package:face_swap_video/features/generation/utils/job_progress.dart';
 import 'package:face_swap_video/features/media/utils/media_file_types.dart';
 
 typedef UploadProgressCallback = void Function(int sentBytes, int totalBytes);
@@ -148,6 +149,7 @@ class ApiService {
     final startedAt = DateTime.now();
 
     var transientNetworkFailures = 0;
+    var pollCount = 0;
 
     while (DateTime.now().difference(startedAt) < _pollTimeout) {
       http.Response statusResponse;
@@ -159,7 +161,12 @@ class ApiService {
       } catch (e) {
         if (_isTransientNetworkError(e) && transientNetworkFailures < 90) {
           transientNetworkFailures++;
-          onProgress?.call(0.35);
+          pollCount++;
+          onProgress?.call(
+            resolveJobProgress(const {
+              'status': 'processing',
+            }, pollCount: pollCount),
+          );
           await Future<void>.delayed(_pollInterval);
           continue;
         }
@@ -173,9 +180,14 @@ class ApiService {
       }
 
       final payload = jsonDecode(statusResponse.body) as Map<String, dynamic>;
+      pollCount++;
       final status = payload['status'] as String?;
+      final resolvedProgress = resolveJobProgress(
+        payload,
+        pollCount: pollCount,
+      );
       if (status == 'completed') {
-        onProgress?.call(0.95);
+        onProgress?.call(resolvedProgress);
         return _downloadJobResult(jobId: jobId, onProgress: onProgress);
       }
       if (status == 'failed') {
@@ -185,7 +197,7 @@ class ApiService {
         );
       }
 
-      onProgress?.call(0.35);
+      onProgress?.call(resolvedProgress);
       await Future<void>.delayed(_pollInterval);
     }
 
