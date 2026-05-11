@@ -1,3 +1,6 @@
+import com.android.build.OutputFile
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -33,6 +36,15 @@ android {
             // Keep debug signing for local release smoke tests until a product
             // release signing plan is explicitly provided.
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    applicationVariants.all {
+        outputs.all {
+            val output = this as BaseVariantOutputImpl
+            val abi = output.getFilter(OutputFile.ABI)
+            val abiSuffix = abi?.let { "-$it" } ?: ""
+            output.outputFileName = "爆肝AI-v${versionName}$abiSuffix-${buildType.name}.apk"
         }
     }
 }

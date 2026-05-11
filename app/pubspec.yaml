@@ -1,7 +1,7 @@
 name: face_swap_video
 description: "极简视频换脸 App"
 publish_to: 'none'
-version: 1.4.0+8
+version: 1.5.1+2015
 
 environment:
   sdk: ^3.11.5
@@ -11,13 +11,14 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   provider: ^6.1.0
-  file_picker: ^8.0.0
+  file_picker: ^11.0.2
   path_provider: ^2.1.0
   photo_manager: ^3.0.0
   http: ^1.2.0
   video_thumbnail: ^0.5.3
   video_player: ^2.9.2
-  flutter_local_notifications: ^18.0.1
+  flutter_local_notifications: ^21.0.0
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
