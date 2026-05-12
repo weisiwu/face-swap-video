@@ -8,6 +8,8 @@
 - 方案 B 改为自托管 FaceFusion：**不依赖 `MergeVideoFace` 资质**。
 - 本阶段不需要 SLS：不创建日志服务 Project/Logstore，不把 SLS 作为前置条件。
 - 本阶段不影响前端 UI：不改 `GenerationScreen`、按钮、弹框、结果页展示；如后续需要切换服务地址，也优先通过服务端域名或配置完成。
+- 当前用户确认：第一阶段可以直接使用阿里云主账号凭证推进，不强制先创建 RAM 子账号。
+- 当前用户确认：域名使用 FC 默认域名，不接入自定义域名 / DNS / 证书。
 
 ## 1. 目标架构
 
@@ -144,11 +146,13 @@ ALIYUN_OSS_ENDPOINT=oss-cn-shanghai.aliyuncs.com
 ALIYUN_REGION_ID=cn-shanghai
 ```
 
-### 5.5 RAM / 权限
+### 5.5 主账号凭证 / 权限
 
-需要用户创建最小权限 RAM 用户或 RAM 角色，不建议主账号 AK。
+当前阶段用户确认：**直接使用主账号**，不强制先创建最小权限 RAM 用户或 RAM 角色。
 
-最小权限方向：
+注意：主账号权限较高，凭证只应配置在本机环境变量或本机私有 `.env` 中，不能写入代码、文档、git commit 或聊天明文输出。
+
+如果后续切回更安全的 RAM 模式，最小权限方向：
 
 - ACR：push/pull 指定镜像仓库；
 - FC：创建/更新服务、函数、触发器、别名；
@@ -165,7 +169,16 @@ ALIYUN_REGION_ID=cn-shanghai
 
 ### 5.6 域名与 HTTPS
 
-第一阶段可以先使用 FC 默认 HTTP 触发器域名验证。若要替换线上 App 服务地址，需要用户确认：
+当前阶段用户确认：**使用 FC 默认域名**。
+
+因此第一阶段不需要：
+
+- 自定义域名；
+- DNS 切换；
+- 证书托管；
+- 替换现有 `facefusion.baoganai.com`。
+
+若后续要替换线上 App 服务地址，再重新确认：
 
 - 是否使用现有 `facefusion.baoganai.com`；
 - DNS 是否可切换到 FC 自定义域名；

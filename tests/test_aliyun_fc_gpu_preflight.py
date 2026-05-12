@@ -22,7 +22,9 @@ def test_preflight_reports_user_owned_missing_prerequisites_without_secrets():
     assert report["required_env_summary"]["ALIYUN_ACCESS_KEY_SECRET"] == "MISSING"
     assert report["no_sls_required"] is True
     assert report["frontend_unchanged_required"] is True
-    assert any("RAM" in action or "AccessKey" in action for action in report["user_action_required"])
+    assert report["account_mode"] == "main_account_confirmed_by_user"
+    assert report["domain_mode"] == "fc_default_domain"
+    assert any("主账号" in action and "AccessKey" in action for action in report["user_action_required"])
 
 
 def test_safe_env_summary_masks_secret_values():

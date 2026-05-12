@@ -29,6 +29,7 @@ REQUIRED_USER_PROVIDED_ENV = (
 )
 
 OPTIONAL_ENV = (
+    "ALIYUN_ACCOUNT_MODE",
     "ALIYUN_ACR_USERNAME",
     "ALIYUN_ACR_PASSWORD",
     "ALIYUN_FC_SERVICE_NAME",
@@ -62,6 +63,8 @@ class PreflightReport:
             "missing_commands": self.missing_commands,
             "no_sls_required": self.no_sls_required,
             "frontend_unchanged_required": self.frontend_unchanged_required,
+            "account_mode": self.env.get("ALIYUN_ACCOUNT_MODE") or "main_account_confirmed_by_user",
+            "domain_mode": self.env.get("ALIYUN_FC_CUSTOM_DOMAIN") or "fc_default_domain",
             "user_action_required": user_action_required(self.missing_required_env),
         }
 
@@ -82,7 +85,7 @@ def safe_env_summary(env: Mapping[str, str]) -> dict[str, str]:
 def user_action_required(missing: list[str]) -> list[str]:
     actions: list[str] = []
     if "ALIYUN_ACCESS_KEY_ID" in missing or "ALIYUN_ACCESS_KEY_SECRET" in missing:
-        actions.append("提供最小权限 RAM AccessKey 或可 AssumeRole 的凭证，不要使用主账号 AK。")
+        actions.append("提供阿里云主账号 AccessKey（当前阶段用户确认可直接使用主账号）。")
     if "ALIYUN_REGION_ID" in missing:
         actions.append("确认 OSS / ACR / FC Serverless GPU 使用的阿里云地域。")
     if "ALIYUN_OSS_BUCKET" in missing or "ALIYUN_OSS_ENDPOINT" in missing:
