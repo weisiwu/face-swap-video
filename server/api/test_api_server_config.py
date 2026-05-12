@@ -14,8 +14,10 @@ def load_server_module(monkeypatch, **env):
         "FF_VIDEO_PROFILE",
         "FF_TARGET_MAX_WIDTH",
         "FF_TARGET_FPS",
+        "FF_PREPROCESS_TIMEOUT_SECONDS",
         "FF_OUTPUT_VIDEO_FPS",
         "FF_OUTPUT_VIDEO_QUALITY",
+        "FF_FACE_SWAPPER_MODEL",
         "API_PORT",
         "FC_SERVER_PORT",
         "PORT",
@@ -50,6 +52,8 @@ def test_default_video_profile_is_preview_and_single_worker(monkeypatch):
         assert module.FF_TARGET_FPS == 12
         assert module.FF_OUTPUT_VIDEO_FPS == "12"
         assert module.FF_OUTPUT_VIDEO_QUALITY == "50"
+        assert module.FF_FACE_SWAPPER_MODEL == "inswapper_128"
+        assert module.FF_PREPROCESS_TIMEOUT_SECONDS == 120
     finally:
         shutdown_module_executor(module)
 
@@ -98,12 +102,14 @@ def test_explicit_video_env_overrides_profile_defaults(monkeypatch):
         FF_TARGET_FPS="15",
         FF_OUTPUT_VIDEO_FPS="15",
         FF_OUTPUT_VIDEO_QUALITY="55",
+        FF_PREPROCESS_TIMEOUT_SECONDS="45",
     )
     try:
         assert module.FF_TARGET_MAX_WIDTH == 480
         assert module.FF_TARGET_FPS == 15
         assert module.FF_OUTPUT_VIDEO_FPS == "15"
         assert module.FF_OUTPUT_VIDEO_QUALITY == "55"
+        assert module.FF_PREPROCESS_TIMEOUT_SECONDS == 45
     finally:
         shutdown_module_executor(module)
 
@@ -133,5 +139,9 @@ def test_swap_status_returns_stage_and_progress(monkeypatch):
         assert payload["stage_label"] == "逐帧换脸"
         assert payload["progress"] == 0.42
         assert payload["video_profile"] == "preview"
+
+        health_payload = asyncio.run(module.health())
+        assert health_payload["face_swapper_model"] == "inswapper_128"
+        assert health_payload["preprocess_timeout_seconds"] == 120
     finally:
         shutdown_module_executor(module)

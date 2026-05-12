@@ -22,7 +22,11 @@ FF_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/
 FF_PYTHON = os.environ.get("FF_PYTHON", "/opt/miniconda3/envs/facefusion/bin/python")
 FF_EXECUTION_PROVIDERS = os.environ.get("FF_EXECUTION_PROVIDERS", "coreml")
 FF_PROCESSORS = os.environ.get("FF_PROCESSORS", "face_swapper")
-FF_FACE_SWAPPER_MODEL = os.environ.get("FF_FACE_SWAPPER_MODEL", "inswapper_128_fp16")
+# Use the model that is packaged into the FC image by default. The fp16 variant
+# is not available in the local .assets cache, so defaulting to it forces
+# FaceFusion to download at runtime and can hang in FC when model hosts are
+# unreachable.
+FF_FACE_SWAPPER_MODEL = os.environ.get("FF_FACE_SWAPPER_MODEL", "inswapper_128")
 FF_EXECUTION_THREAD_COUNT = os.environ.get("FF_EXECUTION_THREAD_COUNT", "4")
 FF_VIDEO_PROFILE = os.environ.get("FF_VIDEO_PROFILE", "preview").strip().lower()
 if FF_VIDEO_PROFILE in {"low", "mvp"}:
@@ -58,6 +62,7 @@ FF_OUTPUT_VIDEO_FPS = os.environ.get("FF_OUTPUT_VIDEO_FPS", _PROFILE["output_vid
 FF_OPTIMIZE_TARGET_VIDEO = os.environ.get("FF_OPTIMIZE_TARGET_VIDEO", "1") != "0"
 FF_TARGET_MAX_WIDTH = int(os.environ.get("FF_TARGET_MAX_WIDTH", _PROFILE["target_max_width"]))
 FF_TARGET_FPS = int(os.environ.get("FF_TARGET_FPS", _PROFILE["target_fps"]))
+FF_PREPROCESS_TIMEOUT_SECONDS = max(5, int(os.environ.get("FF_PREPROCESS_TIMEOUT_SECONDS", "120")))
 VIDEO_MAX_WORKERS = max(1, min(int(os.environ.get("VIDEO_MAX_WORKERS", "1")), 4))
 FFMPEG_SEARCH_PATHS = [
     os.path.expanduser("~/miniconda3/bin"),
@@ -332,20 +337,38 @@ def _preprocess_target_video(target_path: Path) -> Path:
         str(optimized_path),
     ]
     started_at = time.perf_counter()
+    original_size = target_path.stat().st_size if target_path.exists() else 0
+    print(
+        f"[video-preprocess] start file={target_path.name} bytes={original_size} "
+        f"profile={FF_VIDEO_PROFILE} max_width={FF_TARGET_MAX_WIDTH} fps={FF_TARGET_FPS} "
+        f"timeout_seconds={FF_PREPROCESS_TIMEOUT_SECONDS}",
+        flush=True,
+    )
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=FF_PREPROCESS_TIMEOUT_SECONDS)
+        elapsed = time.perf_counter() - started_at
         if result.returncode == 0 and optimized_path.exists() and optimized_path.stat().st_size > 0:
-            original_size = target_path.stat().st_size if target_path.exists() else 0
             optimized_size = optimized_path.stat().st_size
             print(
-                f"[video-preprocess] {target_path.name}: {original_size} -> {optimized_size} bytes "
-                f"in {time.perf_counter() - started_at:.2f}s",
+                f"[video-preprocess] done file={target_path.name} original_bytes={original_size} "
+                f"optimized_bytes={optimized_size} elapsed_seconds={elapsed:.2f}",
                 flush=True,
             )
             return optimized_path
-        print(f"[video-preprocess] skipped: {result.stderr[-500:]}", flush=True)
+        print(
+            f"[video-preprocess] skipped file={target_path.name} exit={result.returncode} "
+            f"elapsed_seconds={elapsed:.2f} stderr_tail={result.stderr[-500:]}",
+            flush=True,
+        )
+    except subprocess.TimeoutExpired as exc:
+        print(
+            f"[video-preprocess] timeout file={target_path.name} "
+            f"elapsed_seconds={time.perf_counter() - started_at:.2f} "
+            f"timeout_seconds={FF_PREPROCESS_TIMEOUT_SECONDS}; using original target",
+            flush=True,
+        )
     except Exception as exc:
-        print(f"[video-preprocess] skipped: {exc}", flush=True)
+        print(f"[video-preprocess] skipped file={target_path.name} error={exc}", flush=True)
 
     try:
         optimized_path.unlink(missing_ok=True)
@@ -398,9 +421,25 @@ def _copy_audio_from_target(target_path: Path, swapped_path: Path) -> Path:
 
 def _run_video_swap(job_id: str, src_path: Path, tgt_path: Path, raw_out_path: Path) -> Path:
     _update_job_stage(job_id, "preprocessing", 0.08)
+    print(
+        f"[video-job:{job_id}] preprocess_start source_bytes={src_path.stat().st_size if src_path.exists() else 0} "
+        f"target_bytes={tgt_path.stat().st_size if tgt_path.exists() else 0}",
+        flush=True,
+    )
+    preprocess_started_at = time.perf_counter()
     prepared_tgt_path = _preprocess_target_video(tgt_path)
+    print(
+        f"[video-job:{job_id}] preprocess_done elapsed_seconds={time.perf_counter() - preprocess_started_at:.2f} "
+        f"prepared_target={prepared_tgt_path.name} prepared_bytes={prepared_tgt_path.stat().st_size if prepared_tgt_path.exists() else 0}",
+        flush=True,
+    )
     _update_job_stage(job_id, "detecting_face", 0.18)
     started_at = time.perf_counter()
+    print(
+        f"[video-job:{job_id}] facefusion_start model={FF_FACE_SWAPPER_MODEL} providers={FF_EXECUTION_PROVIDERS} "
+        f"profile={FF_VIDEO_PROFILE} output_fps={FF_OUTPUT_VIDEO_FPS} quality={FF_OUTPUT_VIDEO_QUALITY}",
+        flush=True,
+    )
     exit_code, stdout, stderr = _run_facefusion([
         "--source-paths", str(src_path),
         "--target-path", str(prepared_tgt_path),
@@ -414,7 +453,7 @@ def _run_video_swap(job_id: str, src_path: Path, tgt_path: Path, raw_out_path: P
         "--output-video-fps", FF_OUTPUT_VIDEO_FPS,
         "--log-level", "warn",
     ], timeout=1800, job_id=job_id)
-    print(f"[video-swap] facefusion finished in {time.perf_counter() - started_at:.2f}s exit={exit_code}", flush=True)
+    print(f"[video-job:{job_id}] facefusion_done elapsed_seconds={time.perf_counter() - started_at:.2f} exit={exit_code}", flush=True)
 
     if exit_code != 0 or not raw_out_path.exists():
         error_detail = stderr.strip() or stdout.strip() or "Unknown error"
@@ -473,12 +512,14 @@ async def health():
         "version": "1.0.0",
         "facefusion_path": FF_DIR,
         "execution_providers": FF_EXECUTION_PROVIDERS,
+        "face_swapper_model": FF_FACE_SWAPPER_MODEL,
         "video_profile": FF_VIDEO_PROFILE,
         "video_max_workers": VIDEO_MAX_WORKERS,
         "target_max_width": FF_TARGET_MAX_WIDTH,
         "target_fps": FF_TARGET_FPS,
         "output_video_fps": FF_OUTPUT_VIDEO_FPS,
         "output_video_quality": FF_OUTPUT_VIDEO_QUALITY,
+        "preprocess_timeout_seconds": FF_PREPROCESS_TIMEOUT_SECONDS,
     }
 
 

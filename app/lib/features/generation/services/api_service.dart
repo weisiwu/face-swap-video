@@ -47,7 +47,10 @@ class SwapJobStatus {
 class ApiService {
   // Cloudflare Tunnel URL — auto-synced from server
   // The LaunchAgent writes this file; App reads it at startup
-  static const String _defaultUrl = 'https://facefusion.baoganai.com';
+  static const String _defaultUrl = String.fromEnvironment(
+    'FACEFUSION_API_BASE_URL',
+    defaultValue: 'https://facefusion.baoganai.com',
+  );
   static const String _healthEndpoint = '/api/health';
   static const String _imageSwapEndpoint = '/api/swap/image';
   static const String _videoJobEndpoint = '/api/swap/video/job';
