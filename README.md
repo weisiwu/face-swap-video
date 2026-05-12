@@ -43,15 +43,61 @@
 | 状态管理 | Provider |
 | Android minSdk | API 29 / Android 10 |
 | 包名 | `com.baoganai.face_swap_video` |
-| 当前版本 | `1.7.1+2018` |
+| 当前版本 | `1.8.2+6026` |
 | 远端服务 | `https://facefusion.baoganai.com` |
+
+## 4. 当前换脸方案与技术原理
+
+### 4.1 当前方案
+
+当前 App 生产链路只接入 **一种换脸实现方案**：
+
+```text
+Flutter Android App
+  → FastAPI 封装的远端 FaceFusion REST API
+  → FaceFusion face_swapper 处理器
+  → inswapper_128_fp16 模型
+  → CoreML execution provider
+  → FFmpeg 预处理 / 输出 / 音轨回填
+```
+
+关键配置以 `server/api/server.py` 为准：
+
+| 配置项 | 当前值 / 默认值 | 说明 |
+|---|---|---|
+| `FF_PROCESSORS` | `face_swapper` | 使用 FaceFusion 的人脸替换处理器 |
+| `FF_FACE_SWAPPER_MODEL` | `inswapper_128_fp16` | 当前实际换脸模型 |
+| `FF_EXECUTION_PROVIDERS` | `coreml` | 在 macOS 服务端优先走 CoreML 加速 |
+| `FF_VIDEO_PROFILE` | `preview` | 默认预览档，优先降低等待时间 |
+| `VIDEO_MAX_WORKERS` | `1` | 视频任务默认串行处理，避免多个重模型任务抢 CoreML/GPU 资源 |
+
+### 4.2 技术原理
+
+1. **素材选择**：Android 端选择源人脸图片与目标图片/视频；视频限制为不超过 1 分钟、100 MB。
+2. **移动端压缩**：大视频在上传前先压缩到移动端友好的分辨率/FPS，减少上行体积和服务端逐帧处理量。
+3. **服务端预处理**：服务端使用 FFmpeg 对目标视频再做分辨率/FPS 保护性预处理；默认 `preview` 档约为 360p / 12fps，输出质量 50。
+4. **人脸检测与特征抽取**：FaceFusion 检测源图和目标帧中的人脸，提取人脸特征与关键点。
+5. **逐帧人脸替换**：`inswapper_128_fp16` 将源人脸身份特征迁移到目标帧的人脸区域，并尽量保留目标视频的姿态、表情、光照和背景。
+6. **编码与音轨回填**：FaceFusion 生成换脸后的视频帧；服务端再用 FFmpeg 把目标视频音轨拷回结果视频，输出 Android 端可预览/保存的 MP4。
+7. **任务轮询**：视频换脸通过 `/api/swap/video/job` 创建任务，Android 端轮询 `/api/swap/status/{jobId}`，完成后从 `/api/swap/result/{jobId}` 下载结果。
+
+### 4.3 当前是否只有这一种方案？
+
+- **在当前 App 已接入的生产链路里：是，只有 FaceFusion + `inswapper_128_fp16` 这一种方案。** 客户端没有做多模型选择，也没有内置本地推理。
+- **从技术路线看：不是只能有这一种。** 可选方向包括：
+  - **提高当前方案质量**：把服务端 profile 从 `preview` 提到 `fast` 或 `high_quality`，例如 540p/18fps 或 720p/24fps；质量更好但耗时更长。
+  - **增强后处理**：在 FaceFusion 链路中增加人脸增强/修复类处理器，改善清晰度，但会增加耗时和失败面。
+  - **更换/并行评估模型**：评估 SimSwap、DeepFaceLab/SAEHD、FaceSwapLab、商用 API 等替代路线。通常质量、训练成本、推理速度、可控性、合规和部署复杂度之间需要取舍。
+  - **高质量定制方案**：对特定人物/场景做定制训练或少样本适配，质量可能更高，但不适合作为当前移动端 MVP 的默认路线。
+
+当前建议：短期继续以 FaceFusion 方案打磨稳定性和速度；如果要追求更高清或更稳的人脸一致性，先用同一素材做 `preview / fast / high_quality` 三档对比，再决定是否引入第二套模型链路。
 
 性能优化策略：
 
 - Android 端对大视频上传前先压缩到 960×540 / 24fps，减少上行体积；
 - Cloudflare Tunnel 固定使用 HTTP/2，规避当前网络环境下 QUIC 频繁 timeout/reconnect 导致的上传抖动；
 - 服务端视频任务单 worker 串行执行，避免多个 CoreML/FaceFusion 任务并发抢资源导致变慢或失败；
-- 服务端对目标视频再做 720p / 24fps 保护性预处理，并使用 `ultrafast` 输出 preset，优先保证移动端等待时间。
+- 服务端按 `FF_VIDEO_PROFILE` 对目标视频做保护性预处理：`preview`≈360p/12fps，`fast`≈540p/18fps，`high_quality`≈720p/24fps，并使用 `ultrafast` 输出 preset，优先保证移动端等待时间。
 
 主要依赖：
 
@@ -64,7 +110,7 @@
 - `flutter_local_notifications`：后台完成通知；
 - `url_launcher`：用户协议/隐私政策跳转。
 
-## 4. 当前目录
+## 5. 当前目录
 
 ```text
 face-swap-video/
@@ -94,7 +140,7 @@ face-swap-video/
 └── src/face_swap_video/         # 初始化遗留 Python，仅参考
 ```
 
-## 5. 主流程
+## 6. 主流程
 
 ```text
 启动页
@@ -120,7 +166,9 @@ face-swap-video/
 - 只有用户把 App 切到后台后，才进入后台等待/通知语义；
 - 生成结果必须保留 AI 生成/换脸提示与授权素材提醒。
 
-## 6. 远端 API
+当前指定原始输入视频：后续真实链路验证默认使用桌面文件 `/Users/weisiwu_clawbot_mac/Desktop/李时珍2.mp4` 作为目标/原始输入视频。
+
+## 7. 远端 API
 
 默认服务地址：
 
@@ -145,7 +193,7 @@ https://facefusion.baoganai.com
 - `docs/TECH_DESIGN.md`
 - `context/project-context.md`
 
-## 7. Android App 快速验证
+## 8. Android App 快速验证
 
 > 项目原始路径可能包含中文，Flutter/Gradle 构建请固定使用 `/tmp/zfj` ASCII 路径。
 
@@ -163,7 +211,7 @@ Debug APK 输出路径：
 /tmp/zfj/apps/face-swap-video/app/build/app/outputs/flutter-apk/app-debug.apk
 ```
 
-## 8. Release APK 打包
+## 9. Release APK 打包
 
 ```bash
 cd /tmp/zfj/apps/face-swap-video
@@ -188,7 +236,7 @@ APK 命名规则：
 - 脚本每次构建前会清理旧 APK，避免不同版本混杂；
 - 当前正式 release signing 仍待收口，详见 `tasks/02-release-signing.md`。
 
-## 9. 测试与文档
+## 10. 测试与文档
 
 核心文档：
 
@@ -206,7 +254,7 @@ APK 命名规则：
 - 相册名称、媒体文件类型、选择文件名；
 - 生成页 widget 流程与前后台状态。
 
-## 10. 待办任务
+## 11. 待办任务
 
 当前后续任务以独立 task 文件维护：
 

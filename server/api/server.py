@@ -79,14 +79,14 @@ VIDEO_JOB_EXECUTOR = ThreadPoolExecutor(max_workers=VIDEO_MAX_WORKERS, thread_na
 
 # ── App ─────────────────────────────────────────────────────────────────
 try:
-    from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+    from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse
     import uvicorn
 except ImportError:
     print("Installing dependencies...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "fastapi", "uvicorn", "python-multipart", "-q"])
-    from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+    from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse
     import uvicorn
@@ -100,7 +100,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _log_upload_receive_timing(request: Request, call_next):
+    """Measure raw ASGI request-body receive timing before FastAPI parses multipart.
+
+    Endpoint code starts only after multipart parsing, so this middleware is the
+    boundary that tells us whether time was spent on phone/network/tunnel ingress
+    versus server-side saving/queueing.
+    """
+    if request.url.path not in {"/api/swap/video/job", "/api/swap/video", "/api/swap/image"}:
+        return await call_next(request)
+
+    request_id = uuid.uuid4().hex[:8]
+    content_length = request.headers.get("content-length", "unknown")
+    content_type = request.headers.get("content-type", "unknown")
+    started_at = time.perf_counter()
+    first_byte_at: float | None = None
+    last_body_at: float | None = None
+    received_bytes = 0
+    chunk_count = 0
+    max_chunk_gap = 0.0
+    previous_chunk_at = started_at
+    original_receive = request._receive
+
+    _upload_log(
+        f"[upload:{request_id}] receive_start path={request.url.path} "
+        f"content_length={content_length} content_type={content_type}"
+    )
+
+    async def receive_with_metrics():
+        nonlocal first_byte_at, last_body_at, received_bytes, chunk_count, max_chunk_gap, previous_chunk_at
+        message = await original_receive()
+        if message.get("type") == "http.request":
+            now = time.perf_counter()
+            body = message.get("body") or b""
+            if body:
+                if first_byte_at is None:
+                    first_byte_at = now
+                gap = now - previous_chunk_at
+                if gap > max_chunk_gap:
+                    max_chunk_gap = gap
+                previous_chunk_at = now
+                received_bytes += len(body)
+                chunk_count += 1
+                last_body_at = now
+            if not message.get("more_body", False):
+                elapsed = now - started_at
+                active_receive = (last_body_at or now) - (first_byte_at or started_at)
+                mbps = _throughput_mbps(received_bytes, active_receive)
+                _upload_log(
+                    f"[upload:{request_id}] receive_complete path={request.url.path} "
+                    f"received_bytes={received_bytes} chunk_count={chunk_count} "
+                    f"elapsed_seconds={elapsed:.3f} active_receive_seconds={active_receive:.3f} "
+                    f"throughput_mbps={mbps:.2f} first_byte_seconds={(first_byte_at - started_at) if first_byte_at else -1:.3f} "
+                    f"max_chunk_gap_seconds={max_chunk_gap:.3f}"
+                )
+        return message
+
+    request._receive = receive_with_metrics
+    request.state.upload_request_id = request_id
+    response = await call_next(request)
+    total_elapsed = time.perf_counter() - started_at
+    _upload_log(
+        f"[upload:{request_id}] response_start path={request.url.path} "
+        f"status_code={response.status_code} total_elapsed_seconds={total_elapsed:.3f} "
+        f"received_bytes={received_bytes}"
+    )
+    response.headers["X-Upload-Debug-Id"] = request_id
+    return response
+
 # ── Helpers ──────────────────────────────────────────────────────────────
+
+def _upload_log(message: str) -> None:
+    print(message, flush=True)
+
+
+def _throughput_mbps(bytes_count: int, seconds: float) -> float:
+    if seconds <= 0:
+        return 0.0
+    return bytes_count * 8 / seconds / 1_000_000
+
 
 def _run_facefusion(args: list[str], timeout: int = 600, job_id: str | None = None) -> tuple[int, str, str]:
     """Run FaceFusion headless-run and return (exit_code, stdout, stderr)."""
@@ -495,6 +575,7 @@ async def swap_video(
 
 @app.post("/api/swap/video/job")
 async def swap_video_job(
+    request: Request,
     source: UploadFile = File(..., description="Source image with the face to use"),
     target: UploadFile = File(..., description="Target video to swap face into"),
 ):
@@ -509,10 +590,25 @@ async def swap_video_job(
             raise HTTPException(400, f"{name} file is required")
 
     job_id = uuid.uuid4().hex
+    upload_debug_id = getattr(request.state, "upload_request_id", "unknown")
+    endpoint_started_at = time.perf_counter()
+    _upload_log(
+        f"[upload:{upload_debug_id}] endpoint_start job_id={job_id} "
+        f"source_filename={source.filename} target_filename={target.filename}"
+    )
     upload_started_at = time.perf_counter()
     src_path, source_bytes, source_save_seconds = _save_upload(source, "src_face")
+    _upload_log(
+        f"[upload:{upload_debug_id}] source_saved job_id={job_id} bytes={source_bytes} "
+        f"save_seconds={source_save_seconds:.3f}"
+    )
     tgt_path, target_bytes, target_save_seconds = _save_upload(target, "tgt_video")
+    _upload_log(
+        f"[upload:{upload_debug_id}] target_saved job_id={job_id} bytes={target_bytes} "
+        f"save_seconds={target_save_seconds:.3f} throughput_mbps={_throughput_mbps(target_bytes, target_save_seconds):.2f}"
+    )
     upload_save_seconds = time.perf_counter() - upload_started_at
+    endpoint_seconds = time.perf_counter() - endpoint_started_at
     out_path = _make_output_path(f"vid_swap_{job_id}", ".mp4")
     _set_job(
         job_id,
@@ -528,12 +624,31 @@ async def swap_video_job(
         source_save_seconds=round(source_save_seconds, 3),
         target_save_seconds=round(target_save_seconds, 3),
         upload_save_seconds=round(upload_save_seconds, 3),
+        endpoint_seconds=round(endpoint_seconds, 3),
+        upload_debug_id=upload_debug_id,
         created_at=time.time(),
         updated_at=time.time(),
     )
 
     VIDEO_JOB_EXECUTOR.submit(_process_video_job, job_id, src_path, tgt_path, out_path)
-    return JSONResponse({"job_id": job_id, "status": "queued", "stage": "queued", "stage_label": _STAGE_LABELS["queued"], "progress": 0.0, "video_profile": FF_VIDEO_PROFILE})
+    _upload_log(
+        f"[upload:{upload_debug_id}] job_queued job_id={job_id} source_bytes={source_bytes} "
+        f"target_bytes={target_bytes} upload_save_seconds={upload_save_seconds:.3f} "
+        f"endpoint_seconds={endpoint_seconds:.3f}"
+    )
+    return JSONResponse({
+        "job_id": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "stage_label": _STAGE_LABELS["queued"],
+        "progress": 0.0,
+        "video_profile": FF_VIDEO_PROFILE,
+        "upload_debug_id": upload_debug_id,
+        "source_bytes": source_bytes,
+        "target_bytes": target_bytes,
+        "upload_save_seconds": round(upload_save_seconds, 3),
+        "endpoint_seconds": round(endpoint_seconds, 3),
+    })
 
 
 @app.get("/api/swap/status/{job_id}")
@@ -555,6 +670,10 @@ async def swap_status(job_id: str):
         "source_bytes": job.get("source_bytes"),
         "target_bytes": job.get("target_bytes"),
         "upload_save_seconds": job.get("upload_save_seconds"),
+        "source_save_seconds": job.get("source_save_seconds"),
+        "target_save_seconds": job.get("target_save_seconds"),
+        "endpoint_seconds": job.get("endpoint_seconds"),
+        "upload_debug_id": job.get("upload_debug_id"),
         "processing_seconds": job.get("processing_seconds"),
     }
 

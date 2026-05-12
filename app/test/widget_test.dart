@@ -195,7 +195,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(of: stickyFooter, matching: find.text('v1.8.1')),
+        find.descendant(of: stickyFooter, matching: find.text('v1.8.2')),
         findsOneWidget,
       );
     },

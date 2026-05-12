@@ -210,14 +210,21 @@ class ApiService {
       'swapVideoJob -> POST $url sourceBytes=$sourceSize targetBytes=$targetSize sourcePath=$sourcePath targetPath=$targetPath',
     );
 
+    final multipartBuildStopwatch = Stopwatch()..start();
     final request = http.MultipartRequest('POST', Uri.parse(url));
     request.files.add(await http.MultipartFile.fromPath('source', sourcePath));
     request.files.add(await http.MultipartFile.fromPath('target', targetPath));
+    multipartBuildStopwatch.stop();
+    appLogger.i(
+      _logTag,
+      'swapVideoJob multipart built contentLength=${request.contentLength} buildMs=${multipartBuildStopwatch.elapsedMilliseconds}',
+    );
 
     final stopwatch = Stopwatch()..start();
     try {
       final streamedResponse = await _sendMultipartRequest(
         request,
+        debugLabel: 'swapVideoJob',
         onUploadProgress: onUploadProgress,
       ).timeout(_uploadTimeout);
       final body = await streamedResponse.stream.bytesToString();
@@ -240,7 +247,10 @@ class ApiService {
         );
         throw ApiException(500, 'Server did not return a job id');
       }
-      appLogger.i(_logTag, 'swapVideoJob jobId=$jobId');
+      appLogger.i(
+        _logTag,
+        'swapVideoJob jobId=$jobId uploadDebugId=${payload['upload_debug_id']} sourceBytes=${payload['source_bytes']} targetBytes=${payload['target_bytes']} uploadSaveSeconds=${payload['upload_save_seconds']} endpointSeconds=${payload['endpoint_seconds']}',
+      );
       return jobId;
     } on ApiException {
       rethrow;
@@ -449,6 +459,7 @@ class ApiService {
 
   Future<http.StreamedResponse> _sendMultipartRequest(
     http.MultipartRequest request, {
+    String debugLabel = 'multipart',
     UploadProgressCallback? onUploadProgress,
   }) async {
     final client = http.Client();
@@ -461,12 +472,19 @@ class ApiService {
       ..persistentConnection = request.persistentConnection
       ..contentLength = totalBytes;
 
+    final sendStopwatch = Stopwatch()..start();
+    appLogger.i(
+      _logTag,
+      '$debugLabel http send start method=${request.method} url=${request.url} totalBytes=$totalBytes contentType=${request.headers['content-type']}',
+    );
+
     unawaited(
       streamedRequest.sink
           .addStream(
             _trackUploadProgress(
               byteStream,
               totalBytes: totalBytes,
+              debugLabel: debugLabel,
               onUploadProgress: onUploadProgress,
             ),
           )
@@ -478,8 +496,20 @@ class ApiService {
 
     try {
       final response = await client.send(streamedRequest);
+      sendStopwatch.stop();
+      appLogger.i(
+        _logTag,
+        '$debugLabel response headers received status=${response.statusCode} elapsedMs=${sendStopwatch.elapsedMilliseconds} contentLength=${response.contentLength}',
+      );
       return _closeClientWhenDone(response, client);
-    } catch (_) {
+    } catch (error, stack) {
+      sendStopwatch.stop();
+      appLogger.e(
+        _logTag,
+        '$debugLabel http send failed elapsedMs=${sendStopwatch.elapsedMilliseconds}',
+        error,
+        stack,
+      );
       client.close();
       rethrow;
     }
@@ -488,23 +518,38 @@ class ApiService {
   Stream<List<int>> _trackUploadProgress(
     http.ByteStream stream, {
     required int totalBytes,
+    required String debugLabel,
     UploadProgressCallback? onUploadProgress,
   }) async* {
     var sentBytes = 0;
+    var chunkCount = 0;
+    var maxChunkGapMs = 0;
     var nextLogThreshold = 0.25;
     final stopwatch = Stopwatch()..start();
-    appLogger.i(_logTag, 'upload start totalBytes=$totalBytes');
+    var previousChunkElapsedMs = 0;
+    int? firstChunkMs;
+    appLogger.i(
+      _logTag,
+      '$debugLabel upload stream start totalBytes=$totalBytes',
+    );
     onUploadProgress?.call(sentBytes, totalBytes);
     try {
       await for (final chunk in stream) {
+        final elapsedMs = stopwatch.elapsedMilliseconds;
+        firstChunkMs ??= elapsedMs;
+        final gapMs = elapsedMs - previousChunkElapsedMs;
+        if (gapMs > maxChunkGapMs) maxChunkGapMs = gapMs;
+        previousChunkElapsedMs = elapsedMs;
+        chunkCount += 1;
         sentBytes += chunk.length;
         onUploadProgress?.call(sentBytes, totalBytes);
         if (totalBytes > 0) {
           final fraction = sentBytes / totalBytes;
           while (nextLogThreshold <= 1.0 && fraction >= nextLogThreshold) {
+            final mbps = _mbps(sentBytes, stopwatch.elapsedMilliseconds);
             appLogger.i(
               _logTag,
-              'upload progress ${(nextLogThreshold * 100).round()}% sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds}',
+              '$debugLabel upload progress ${(nextLogThreshold * 100).round()}% sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds} throughputMbps=${mbps.toStringAsFixed(2)} chunkCount=$chunkCount maxChunkGapMs=$maxChunkGapMs',
             );
             nextLogThreshold += 0.25;
           }
@@ -512,20 +557,26 @@ class ApiService {
         yield chunk;
       }
       stopwatch.stop();
+      final mbps = _mbps(sentBytes, stopwatch.elapsedMilliseconds);
       appLogger.i(
         _logTag,
-        'upload finished sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds}',
+        '$debugLabel upload stream finished sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds} firstChunkMs=${firstChunkMs ?? -1} throughputMbps=${mbps.toStringAsFixed(2)} chunkCount=$chunkCount maxChunkGapMs=$maxChunkGapMs',
       );
     } catch (error, stack) {
       stopwatch.stop();
       appLogger.e(
         _logTag,
-        'upload aborted sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds}',
+        '$debugLabel upload stream aborted sentBytes=$sentBytes totalBytes=$totalBytes elapsedMs=${stopwatch.elapsedMilliseconds} chunkCount=$chunkCount maxChunkGapMs=$maxChunkGapMs',
         error,
         stack,
       );
       rethrow;
     }
+  }
+
+  double _mbps(int bytes, int elapsedMs) {
+    if (elapsedMs <= 0) return 0;
+    return bytes * 8 / elapsedMs / 1000;
   }
 
   http.StreamedResponse _closeClientWhenDone(

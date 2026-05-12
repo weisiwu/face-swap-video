@@ -155,11 +155,26 @@ class GenerationProvider extends ChangeNotifier {
       // at 0%, reaches 100%, then server processing starts from 0% again.
       final uploadPhaseId = _beginProgressPhase(uploadMaterialBaseLabel, runId);
 
+      final uploadUiStopwatch = Stopwatch()..start();
+      var lastUploadUiElapsedMs = -1000;
+      var lastUploadUiFraction = -1.0;
+
       void handleUploadProgress(int sentBytes, int totalBytes) {
         if (!_isActiveRun(runId)) return;
         final uploadFraction = totalBytes > 0 ? sentBytes / totalBytes : 0.0;
+        final clampedFraction = uploadFraction.clamp(0.0, 1.0).toDouble();
+        final elapsedMs = uploadUiStopwatch.elapsedMilliseconds;
+        final isTerminal = totalBytes > 0 && sentBytes >= totalBytes;
+        final enoughTimePassed = elapsedMs - lastUploadUiElapsedMs >= 100;
+        final enoughProgressChanged =
+            (clampedFraction - lastUploadUiFraction).abs() >= 0.01;
+        if (!isTerminal && !enoughTimePassed && !enoughProgressChanged) {
+          return;
+        }
+        lastUploadUiElapsedMs = elapsedMs;
+        lastUploadUiFraction = clampedFraction;
         _updateProgress(
-          uploadFraction.clamp(0.0, 1.0).toDouble(),
+          clampedFraction,
           formatUploadProgressLabel(
             uploadedBytes: sentBytes,
             totalBytes: totalBytes,
