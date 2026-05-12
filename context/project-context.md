@@ -79,12 +79,14 @@ apps/face-swap-video/
 ## 阻塞点
 
 - 远端接口已按当前客户端实现固化为：`/api/health`、`/api/swap/image`、`/api/swap/video/job`、`/api/swap/status/{jobId}`、`/api/swap/result/{jobId}`；后续若服务端协议变化，需要同步更新 `app/lib/features/generation/services/api_service.dart` 与测试/文档。
-- 尚未提供授权测试素材。
+- 阿里云方案 A（OSS + `MergeVideoFace`）因接口申请需要公司资质而暂停；当前没有相关资质，不继续真实 API 调用或 App 接入。
+- 方案 B 正在独立分支验证：OSS + FC Serverless GPU + FaceFusion + ACR；第一阶段不使用 SLS、不改前端界面展示。
 - 分享能力仍待产品确认；当前重点保持完成预览、保存入口与前后台通知链路稳定。
 
 ## 下一步
 
-1. 用授权素材验证真实远端任务链路：健康检查 → 上传 → 轮询 → 下载结果。
-2. 为 `GenerationProvider` 的状态流补充窄范围单元测试，覆盖取消、失败恢复与前后台切换。
-3. 产品确认分享能力后，再实现结果分享入口。
-4. 持续更新 PRD/技术方案/测试用例文档，确保与 Android App 现状一致。
+1. 方案 B：等待用户提供阿里云 FC GPU / ACR / OSS / RAM 前置资源后，构建 FaceFusion GPU 容器并部署到 FC。
+2. 用授权素材验证真实远端任务链路：健康检查 → 上传 → 轮询 → 下载结果。
+3. 为 `GenerationProvider` 的状态流补充窄范围单元测试，覆盖取消、失败恢复与前后台切换。
+4. 产品确认分享能力后，再实现结果分享入口。
+5. 持续更新 PRD/技术方案/测试用例文档，确保与 Android App 现状一致。
