@@ -205,14 +205,17 @@ ALIYUN_REGION_ID=cn-shanghai
 ## 6. 第一阶段最小验证路径
 
 ```text
-Step 1: 本地构建 FaceFusion GPU 容器
-Step 2: push 到 ACR
-Step 3: FC 创建 GPU 自定义容器服务，不启用 SLS
-Step 4: curl /api/health
-Step 5: 用小视频 + 源人脸图走 /api/swap/video/job
-Step 6: 轮询 /api/swap/status/{jobId}
-Step 7: 下载 /api/swap/result/{jobId}
-Step 8: 记录耗时、冷启动、费用、成功率、输出质量
+Step 1: 准备 ACR/FC 部署资产仓库
+        - 仓库：github.com/weisiwu/facefusion-fc-gpu-acr
+        - 资产：Dockerfile、build/push 脚本、FC custom-container 模板、health smoke test
+Step 2: 本地构建 FaceFusion GPU 容器
+Step 3: push 到 ACR
+Step 4: FC 创建 GPU 自定义容器服务，不启用 SLS
+Step 5: curl /api/health
+Step 6: 用小视频 + 源人脸图走 /api/swap/video/job
+Step 7: 轮询 /api/swap/status/{jobId}
+Step 8: 下载 /api/swap/result/{jobId}
+Step 9: 记录耗时、冷启动、费用、成功率、输出质量
 ```
 
 ## 7. 验证输出标准

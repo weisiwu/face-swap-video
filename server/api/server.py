@@ -17,9 +17,9 @@ from datetime import datetime
 from pathlib import Path
 
 # ── Config ──────────────────────────────────────────────────────────────
-API_PORT = int(os.environ.get("API_PORT", "9999"))
-FF_PYTHON = "/opt/miniconda3/envs/facefusion/bin/python"
+API_PORT = int(os.environ.get("API_PORT", os.environ.get("FC_SERVER_PORT", os.environ.get("PORT", "9999"))))
 FF_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # server/
+FF_PYTHON = os.environ.get("FF_PYTHON", "/opt/miniconda3/envs/facefusion/bin/python")
 FF_EXECUTION_PROVIDERS = os.environ.get("FF_EXECUTION_PROVIDERS", "coreml")
 FF_PROCESSORS = os.environ.get("FF_PROCESSORS", "face_swapper")
 FF_FACE_SWAPPER_MODEL = os.environ.get("FF_FACE_SWAPPER_MODEL", "inswapper_128_fp16")

@@ -16,6 +16,10 @@ def load_server_module(monkeypatch, **env):
         "FF_TARGET_FPS",
         "FF_OUTPUT_VIDEO_FPS",
         "FF_OUTPUT_VIDEO_QUALITY",
+        "API_PORT",
+        "FC_SERVER_PORT",
+        "PORT",
+        "FF_PYTHON",
     ]:
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
