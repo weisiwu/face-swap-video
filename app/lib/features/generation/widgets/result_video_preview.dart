@@ -168,23 +168,8 @@ class _ResultVideoPreviewState extends State<ResultVideoPreview> {
                   ),
                 ),
               ),
-              if (!isPlaying)
-                Container(
-                  width: 26,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.46),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.22),
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.play_arrow_rounded,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                ),
+              // Bottom-left play affordance is enough; avoid a large centered
+              // circle over the preview/fallback state.
               if (isReady)
                 Positioned(
                   left: 0,

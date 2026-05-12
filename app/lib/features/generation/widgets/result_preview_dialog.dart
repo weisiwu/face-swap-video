@@ -84,16 +84,6 @@ class _ResultPreviewDialogState extends State<ResultPreviewDialog> {
             ),
             const SizedBox(height: 10),
             ResultVideoPreview(resultPath: widget.resultPath),
-            const SizedBox(height: 10),
-            Text(
-              '先预览生成结果，确认满意后再保存到系统相册。',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.58),
-                fontSize: 12,
-                height: 1.35,
-              ),
-            ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,

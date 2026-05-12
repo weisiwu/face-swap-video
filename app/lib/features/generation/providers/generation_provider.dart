@@ -186,7 +186,10 @@ class GenerationProvider extends ChangeNotifier {
           return;
         }
         _updateProgress(1.0, '素材上传完成', runId: runId, phaseId: uploadPhaseId);
-        final processingPhaseId = _beginProgressPhase('服务器处理中...', runId);
+        final processingPhaseId = _beginProgressPhase(
+          _serverProcessingStepText(),
+          runId,
+        );
         resultPath = await _api.pollSwapJob(
           jobId: jobId,
           onProgress: (processingProgress) {
@@ -194,7 +197,17 @@ class GenerationProvider extends ChangeNotifier {
               processingProgress.clamp(0.0, 1.0).toDouble(),
               _isAppInBackground
                   ? '后台网络暂时不可用，继续等待服务器完成...'
-                  : '服务器处理中，保持前台可查看进度...',
+                  : _serverProcessingStepText(),
+              runId: runId,
+              phaseId: processingPhaseId,
+            );
+          },
+          onStatus: (jobStatus) {
+            _updateProgress(
+              jobStatus.progress.clamp(0.0, 1.0).toDouble(),
+              _isAppInBackground
+                  ? '后台网络暂时不可用，继续等待服务器完成...'
+                  : _serverProcessingStepText(jobStatus.displayLabel),
               runId: runId,
               phaseId: processingPhaseId,
             );
@@ -321,6 +334,14 @@ class GenerationProvider extends ChangeNotifier {
     _currentStep = step;
     notifyListeners();
     return _progressPhaseId;
+  }
+
+  String _serverProcessingStepText([String? stageLabel]) {
+    final label = stageLabel?.trim();
+    if (label != null && label.isNotEmpty && label != '逐帧换脸') {
+      return '服务端正在$label，预计需要 20～40 秒';
+    }
+    return '服务端正在逐帧换脸，预计需要 20～40 秒';
   }
 
   void _updateProgress(double value, String step, {int? runId, int? phaseId}) {

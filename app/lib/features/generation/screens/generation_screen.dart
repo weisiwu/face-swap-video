@@ -17,7 +17,7 @@ import 'package:face_swap_video/features/auth/screens/login_screen.dart';
 import 'package:face_swap_video/features/media/screens/photo_grid_screen.dart';
 import 'package:face_swap_video/features/media/screens/video_grid_screen.dart';
 
-const String _appVersion = '1.8.0';
+const String _appVersion = '1.8.1';
 
 class GenerationScreen extends StatefulWidget {
   const GenerationScreen({super.key, this.onExitApp = SystemNavigator.pop});
@@ -390,32 +390,96 @@ class _GenerationScreenState extends State<GenerationScreen> {
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF17111F),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-          ),
-          title: Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
+        final isSuccess = title.contains('成功');
+        final accentColor = isSuccess
+            ? const Color(0xFF34D399)
+            : const Color(0xFFF87171);
+        final accentBackground = isSuccess
+            ? const Color(0xFF059669).withValues(alpha: 0.18)
+            : const Color(0xFFDC2626).withValues(alpha: 0.18);
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 48),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 360),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF17111F),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: accentColor.withValues(alpha: 0.28)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  blurRadius: 28,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: accentBackground,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        isSuccess
+                            ? Icons.check_circle_rounded
+                            : Icons.error_rounded,
+                        color: accentColor,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  message,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.68),
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 40,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                      foregroundColor: Colors.white,
+                      textStyle: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('知道了'),
+                  ),
+                ),
+              ],
             ),
           ),
-          content: Text(
-            message,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.62),
-              height: 1.45,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('知道了'),
-            ),
-          ],
         );
       },
     );

@@ -26,6 +26,7 @@ class _CapturingApiService extends ApiService {
   Future<String> pollSwapJob({
     required String jobId,
     void Function(double progress)? onProgress,
+    SwapJobStatusCallback? onStatus,
   }) async {
     onProgress?.call(1);
     return '/tmp/result.mp4';
@@ -76,6 +77,7 @@ class _LateUploadProgressApiService extends ApiService {
   Future<String> pollSwapJob({
     required String jobId,
     void Function(double progress)? onProgress,
+    SwapJobStatusCallback? onStatus,
   }) async {
     _uploadProgress?.call(0, 100);
     onProgress?.call(0.5);
@@ -103,8 +105,17 @@ class _StagedProgressApiService extends ApiService {
   Future<String> pollSwapJob({
     required String jobId,
     void Function(double progress)? onProgress,
+    SwapJobStatusCallback? onStatus,
   }) async {
     onProgress?.call(0.25);
+    onStatus?.call(
+      const SwapJobStatus(
+        progress: 0.35,
+        status: 'processing',
+        stage: 'swapping_frame',
+        stageLabel: '逐帧换脸',
+      ),
+    );
     onProgress?.call(1);
     return '/tmp/result.mp4';
   }
@@ -128,6 +139,7 @@ class _TimeoutApiService extends ApiService {
   Future<String> pollSwapJob({
     required String jobId,
     void Function(double progress)? onProgress,
+    SwapJobStatusCallback? onStatus,
   }) async {
     throw TimeoutException('status timeout');
   }
@@ -154,6 +166,7 @@ class _CancelableApiService extends ApiService {
   Future<String> pollSwapJob({
     required String jobId,
     void Function(double progress)? onProgress,
+    SwapJobStatusCallback? onStatus,
   }) => _pollCompleter.future;
 
   @override
@@ -251,7 +264,7 @@ void main() {
 
         final observedProcessingProgress = <double>[];
         provider.addListener(() {
-          if (provider.currentStep?.contains('服务器处理') ?? false) {
+          if (provider.currentStep?.contains('服务端') ?? false) {
             observedProcessingProgress.add(provider.progress);
           }
         });
@@ -310,7 +323,7 @@ void main() {
           observations,
           contains(
             predicate<String>(
-              (entry) => entry.contains('服务器处理中') && entry.endsWith('|0.0'),
+              (entry) => entry.contains('服务端正在逐帧换脸') && entry.endsWith('|0.0'),
             ),
           ),
         );
@@ -318,7 +331,7 @@ void main() {
           observations,
           contains(
             predicate<String>(
-              (entry) => entry.contains('服务器处理中') && entry.endsWith('|0.25'),
+              (entry) => entry.contains('服务端正在逐帧换脸') && entry.endsWith('|0.25'),
             ),
           ),
         );

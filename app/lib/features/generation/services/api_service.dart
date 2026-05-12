@@ -10,6 +10,39 @@ import 'package:face_swap_video/features/media/utils/media_file_types.dart';
 const String _logTag = 'ApiService';
 
 typedef UploadProgressCallback = void Function(int sentBytes, int totalBytes);
+typedef SwapJobStatusCallback = void Function(SwapJobStatus status);
+
+class SwapJobStatus {
+  const SwapJobStatus({
+    required this.progress,
+    required this.status,
+    this.stage,
+    this.stageLabel,
+  });
+
+  final double progress;
+  final String? status;
+  final String? stage;
+  final String? stageLabel;
+
+  String get displayLabel {
+    final label = stageLabel?.trim();
+    if (label != null && label.isNotEmpty) return label;
+    switch (stage) {
+      case 'preprocessing':
+        return '预处理视频';
+      case 'detecting_face':
+        return '检测人脸';
+      case 'swapping_frame':
+        return '逐帧换脸';
+      case 'encoding':
+        return '编码输出';
+      case 'queued':
+        return '排队中';
+    }
+    return '逐帧换脸';
+  }
+}
 
 class ApiService {
   // Cloudflare Tunnel URL — auto-synced from server
@@ -226,6 +259,7 @@ class ApiService {
   Future<String> pollSwapJob({
     required String jobId,
     void Function(double progress)? onProgress,
+    SwapJobStatusCallback? onStatus,
   }) async {
     final startedAt = DateTime.now();
     appLogger.i(_logTag, 'pollSwapJob start jobId=$jobId');
@@ -249,10 +283,17 @@ class ApiService {
             'pollSwapJob transient network error jobId=$jobId pollCount=$pollCount transientCount=$transientNetworkFailures',
             e,
           );
-          onProgress?.call(
-            resolveJobProgress(const {
-              'status': 'processing',
-            }, pollCount: pollCount),
+          final fallbackProgress = resolveJobProgress(const {
+            'status': 'processing',
+          }, pollCount: pollCount);
+          onProgress?.call(fallbackProgress);
+          onStatus?.call(
+            SwapJobStatus(
+              progress: fallbackProgress,
+              status: 'processing',
+              stage: 'swapping_frame',
+              stageLabel: '逐帧换脸',
+            ),
           );
           await Future<void>.delayed(_pollInterval);
           continue;
@@ -277,6 +318,8 @@ class ApiService {
       pollCount++;
       final status = payload['status'] as String?;
       final serverProgress = payload['progress'];
+      final stage = payload['stage'] as String?;
+      final stageLabel = payload['stage_label'] as String?;
       final resolvedProgress = resolveJobProgress(
         payload,
         pollCount: pollCount,
@@ -284,10 +327,17 @@ class ApiService {
       final elapsedSec = DateTime.now().difference(startedAt).inSeconds;
       appLogger.i(
         _logTag,
-        'pollSwapJob jobId=$jobId pollCount=$pollCount elapsedSec=$elapsedSec status=$status serverProgress=$serverProgress resolvedProgress=${resolvedProgress.toStringAsFixed(3)}',
+        'pollSwapJob jobId=$jobId pollCount=$pollCount elapsedSec=$elapsedSec status=$status stage=$stage serverProgress=$serverProgress resolvedProgress=${resolvedProgress.toStringAsFixed(3)}',
+      );
+      final jobStatus = SwapJobStatus(
+        progress: resolvedProgress,
+        status: status,
+        stage: stage,
+        stageLabel: stageLabel,
       );
       if (status == 'completed') {
         onProgress?.call(resolvedProgress);
+        onStatus?.call(jobStatus);
         return _downloadJobResult(jobId: jobId, onProgress: onProgress);
       }
       if (status == 'failed' || status == 'cancelled') {
@@ -299,6 +349,7 @@ class ApiService {
       }
 
       onProgress?.call(resolvedProgress);
+      onStatus?.call(jobStatus);
       await Future<void>.delayed(_pollInterval);
     }
 

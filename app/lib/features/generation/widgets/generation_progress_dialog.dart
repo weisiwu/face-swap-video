@@ -98,7 +98,7 @@ class GenerationProgressDialog extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    currentProvider.currentStep ?? '请稍候，正在处理素材',
+                    currentProvider.currentStep ?? '服务端正在逐帧换脸，预计需要 20～40 秒',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.58),

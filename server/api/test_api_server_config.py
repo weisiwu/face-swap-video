@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import sys
 import uuid
@@ -36,15 +37,38 @@ def shutdown_module_executor(module):
     module.VIDEO_JOB_EXECUTOR.shutdown(wait=False, cancel_futures=True)
 
 
-def test_default_video_profile_is_fast_and_single_worker(monkeypatch):
+def test_default_video_profile_is_preview_and_single_worker(monkeypatch):
     module = load_server_module(monkeypatch)
     try:
         assert module.VIDEO_MAX_WORKERS == 1
+        assert module.FF_VIDEO_PROFILE == "preview"
+        assert module.FF_TARGET_MAX_WIDTH == 360
+        assert module.FF_TARGET_FPS == 12
+        assert module.FF_OUTPUT_VIDEO_FPS == "12"
+        assert module.FF_OUTPUT_VIDEO_QUALITY == "50"
+    finally:
+        shutdown_module_executor(module)
+
+
+def test_video_profile_fast_keeps_540p_18fps_defaults(monkeypatch):
+    module = load_server_module(monkeypatch, FF_VIDEO_PROFILE="fast")
+    try:
         assert module.FF_VIDEO_PROFILE == "fast"
         assert module.FF_TARGET_MAX_WIDTH == 540
         assert module.FF_TARGET_FPS == 18
         assert module.FF_OUTPUT_VIDEO_FPS == "18"
         assert module.FF_OUTPUT_VIDEO_QUALITY == "60"
+    finally:
+        shutdown_module_executor(module)
+
+
+def test_video_profile_low_alias_maps_to_preview(monkeypatch):
+    module = load_server_module(monkeypatch, FF_VIDEO_PROFILE="low")
+    try:
+        assert module.FF_VIDEO_PROFILE == "preview"
+        assert module.FF_TARGET_MAX_WIDTH == 360
+        assert module.FF_TARGET_FPS == 12
+        assert module.FF_OUTPUT_VIDEO_QUALITY == "50"
     finally:
         shutdown_module_executor(module)
 
@@ -76,5 +100,34 @@ def test_explicit_video_env_overrides_profile_defaults(monkeypatch):
         assert module.FF_TARGET_FPS == 15
         assert module.FF_OUTPUT_VIDEO_FPS == "15"
         assert module.FF_OUTPUT_VIDEO_QUALITY == "55"
+    finally:
+        shutdown_module_executor(module)
+
+
+def test_video_filter_aligns_dimensions_for_android_mediacodec(monkeypatch):
+    module = load_server_module(monkeypatch)
+    try:
+        video_filter = module._codec_safe_video_filter()
+        assert "trunc(iw/16)*16" in video_filter
+        assert "trunc(ih/16)*16" in video_filter
+        assert "fps=12" in video_filter
+    finally:
+        shutdown_module_executor(module)
+
+
+def test_swap_status_returns_stage_and_progress(monkeypatch):
+    module = load_server_module(monkeypatch)
+    try:
+        job_id = "job-status-test"
+        module._set_job(job_id, status="processing")
+        module._update_job_stage(job_id, "swapping_frame", 0.42)
+
+        payload = asyncio.run(module.swap_status(job_id))
+
+        assert payload["status"] == "processing"
+        assert payload["stage"] == "swapping_frame"
+        assert payload["stage_label"] == "逐帧换脸"
+        assert payload["progress"] == 0.42
+        assert payload["video_profile"] == "preview"
     finally:
         shutdown_module_executor(module)

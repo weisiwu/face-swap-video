@@ -24,12 +24,20 @@ FF_EXECUTION_PROVIDERS = os.environ.get("FF_EXECUTION_PROVIDERS", "coreml")
 FF_PROCESSORS = os.environ.get("FF_PROCESSORS", "face_swapper")
 FF_FACE_SWAPPER_MODEL = os.environ.get("FF_FACE_SWAPPER_MODEL", "inswapper_128_fp16")
 FF_EXECUTION_THREAD_COUNT = os.environ.get("FF_EXECUTION_THREAD_COUNT", "4")
-FF_VIDEO_PROFILE = os.environ.get("FF_VIDEO_PROFILE", "fast").strip().lower()
+FF_VIDEO_PROFILE = os.environ.get("FF_VIDEO_PROFILE", "preview").strip().lower()
+if FF_VIDEO_PROFILE in {"low", "mvp"}:
+    FF_VIDEO_PROFILE = "preview"
 if FF_VIDEO_PROFILE in {"high", "quality", "hq"}:
     FF_VIDEO_PROFILE = "high_quality"
-if FF_VIDEO_PROFILE not in {"fast", "high_quality"}:
-    FF_VIDEO_PROFILE = "fast"
+if FF_VIDEO_PROFILE not in {"preview", "fast", "high_quality"}:
+    FF_VIDEO_PROFILE = "preview"
 _PROFILE_DEFAULTS = {
+    "preview": {
+        "target_max_width": "360",
+        "target_fps": "12",
+        "output_video_fps": "12",
+        "output_video_quality": "50",
+    },
     "fast": {
         "target_max_width": "540",
         "target_fps": "18",
@@ -108,6 +116,16 @@ def _run_facefusion(args: list[str], timeout: int = 600, job_id: str | None = No
     if job_id:
         with JOBS_LOCK:
             JOB_PROCESSES[job_id] = process
+    stop_stage_tracker: threading.Event | None = None
+    stage_thread: threading.Thread | None = None
+    if job_id:
+        stop_stage_tracker = threading.Event()
+        stage_thread = threading.Thread(
+            target=_track_facefusion_stage,
+            args=(job_id, stop_stage_tracker),
+            daemon=True,
+        )
+        stage_thread.start()
     try:
         stdout, stderr = process.communicate(timeout=timeout)
         return process.returncode, stdout, stderr
@@ -116,6 +134,10 @@ def _run_facefusion(args: list[str], timeout: int = 600, job_id: str | None = No
         stdout, stderr = process.communicate()
         return 124, stdout, stderr or "FaceFusion timed out"
     finally:
+        if stop_stage_tracker is not None:
+            stop_stage_tracker.set()
+        if stage_thread is not None:
+            stage_thread.join(timeout=1)
         if job_id:
             with JOBS_LOCK:
                 if JOB_PROCESSES.get(job_id) is process:
@@ -171,6 +193,43 @@ def _get_job(job_id: str) -> dict | None:
         return dict(job) if job else None
 
 
+_STAGE_LABELS = {
+    "queued": "排队中",
+    "preprocessing": "预处理视频",
+    "detecting_face": "检测人脸",
+    "swapping_frame": "逐帧换脸",
+    "encoding": "编码输出",
+    "completed": "处理完成",
+    "failed": "处理失败",
+    "cancelled": "已取消",
+}
+
+
+def _update_job_stage(job_id: str, stage: str, progress: float | None = None) -> None:
+    values = {
+        "stage": stage,
+        "stage_label": _STAGE_LABELS.get(stage, stage),
+        "updated_at": time.time(),
+    }
+    if progress is not None:
+        values["progress"] = max(0.0, min(float(progress), 1.0))
+    _set_job(job_id, **values)
+
+
+def _track_facefusion_stage(job_id: str, stop_event: threading.Event) -> None:
+    started_at = time.perf_counter()
+    while not stop_event.wait(3):
+        if _get_job(job_id).get("status") == "cancelled":
+            return
+        elapsed = time.perf_counter() - started_at
+        if elapsed < 6:
+            _update_job_stage(job_id, "detecting_face", 0.18)
+            continue
+        # FaceFusion does not expose exact per-frame progress here, so keep a
+        # conservative synthetic estimate that tells the client the real phase.
+        progress = min(0.85, 0.25 + (elapsed - 6) / 90 * 0.55)
+        _update_job_stage(job_id, "swapping_frame", progress)
+
 
 def _preprocess_target_video(target_path: Path) -> Path:
     """Downscale/FPS-limit large target videos before FaceFusion to reduce frame work."""
@@ -178,11 +237,7 @@ def _preprocess_target_video(target_path: Path) -> Path:
         return target_path
 
     optimized_path = target_path.with_name(f"{target_path.stem}_optimized.mp4")
-    vf = (
-        f"scale='if(gt(iw,ih),min({FF_TARGET_MAX_WIDTH},iw),-2)':"
-        f"'if(gt(iw,ih),-2,min({FF_TARGET_MAX_WIDTH},ih))':flags=fast_bilinear,"
-        f"fps={FF_TARGET_FPS}"
-    )
+    vf = _codec_safe_video_filter()
     cmd = [
         "ffmpeg",
         "-y",
@@ -219,6 +274,23 @@ def _preprocess_target_video(target_path: Path) -> Path:
     return target_path
 
 
+def _codec_safe_video_filter() -> str:
+    """Build a fast filter that keeps result videos Android-decoder friendly.
+
+    Some Android MediaCodec implementations can fail to initialize otherwise
+    valid H.264 streams when dimensions are not macroblock-aligned. The previous
+    fast profile often produced 540x304, which ffprobe considered valid but the
+    Huawei test device failed to preview. Align both dimensions to 16 before
+    FaceFusion generates the final result.
+    """
+    return (
+        f"scale='if(gt(iw,ih),min({FF_TARGET_MAX_WIDTH},iw),-2)':"
+        f"'if(gt(iw,ih),-2,min({FF_TARGET_MAX_WIDTH},ih))':flags=fast_bilinear,"
+        "scale='max(16,trunc(iw/16)*16)':'max(16,trunc(ih/16)*16)':flags=fast_bilinear,"
+        f"fps={FF_TARGET_FPS}"
+    )
+
+
 def _copy_audio_from_target(target_path: Path, swapped_path: Path) -> Path:
     """Copy the original target audio track into FaceFusion's silent video output."""
     final_path = swapped_path.with_name(f"{swapped_path.stem}_audio{swapped_path.suffix}")
@@ -245,7 +317,9 @@ def _copy_audio_from_target(target_path: Path, swapped_path: Path) -> Path:
 
 
 def _run_video_swap(job_id: str, src_path: Path, tgt_path: Path, raw_out_path: Path) -> Path:
+    _update_job_stage(job_id, "preprocessing", 0.08)
     prepared_tgt_path = _preprocess_target_video(tgt_path)
+    _update_job_stage(job_id, "detecting_face", 0.18)
     started_at = time.perf_counter()
     exit_code, stdout, stderr = _run_facefusion([
         "--source-paths", str(src_path),
@@ -266,6 +340,7 @@ def _run_video_swap(job_id: str, src_path: Path, tgt_path: Path, raw_out_path: P
         error_detail = stderr.strip() or stdout.strip() or "Unknown error"
         raise RuntimeError(f"Video face swap failed: {error_detail}")
 
+    _update_job_stage(job_id, "encoding", 0.92)
     try:
         return _copy_audio_from_target(prepared_tgt_path, raw_out_path)
     finally:
@@ -280,6 +355,7 @@ def _process_video_job(job_id: str, src_path: Path, tgt_path: Path, raw_out_path
     if _get_job(job_id).get("status") == "cancelled":
         return
     _set_job(job_id, status="processing", processing_started_at=time.time(), updated_at=time.time())
+    _update_job_stage(job_id, "preprocessing", 0.05)
     started_at = time.perf_counter()
     try:
         final_path = _run_video_swap(job_id, src_path, tgt_path, raw_out_path)
@@ -288,13 +364,16 @@ def _process_video_job(job_id: str, src_path: Path, tgt_path: Path, raw_out_path
         _set_job(
             job_id,
             status="completed",
+            stage="completed",
+            stage_label=_STAGE_LABELS["completed"],
+            progress=1.0,
             output_path=str(final_path),
             processing_seconds=round(time.perf_counter() - started_at, 3),
             updated_at=time.time(),
         )
     except Exception as exc:
         if _get_job(job_id).get("status") != "cancelled":
-            _set_job(job_id, status="failed", error=str(exc), updated_at=time.time())
+            _set_job(job_id, status="failed", stage="failed", stage_label=_STAGE_LABELS["failed"], error=str(exc), updated_at=time.time())
     finally:
         for p in [src_path, tgt_path]:
             try:
@@ -438,6 +517,10 @@ async def swap_video_job(
     _set_job(
         job_id,
         status="queued",
+        stage="queued",
+        stage_label=_STAGE_LABELS["queued"],
+        progress=0.0,
+        video_profile=FF_VIDEO_PROFILE,
         output_path=None,
         error=None,
         source_bytes=source_bytes,
@@ -450,7 +533,7 @@ async def swap_video_job(
     )
 
     VIDEO_JOB_EXECUTOR.submit(_process_video_job, job_id, src_path, tgt_path, out_path)
-    return JSONResponse({"job_id": job_id, "status": "queued"})
+    return JSONResponse({"job_id": job_id, "status": "queued", "stage": "queued", "stage_label": _STAGE_LABELS["queued"], "progress": 0.0, "video_profile": FF_VIDEO_PROFILE})
 
 
 @app.get("/api/swap/status/{job_id}")
@@ -462,6 +545,10 @@ async def swap_status(job_id: str):
     return {
         "job_id": job_id,
         "status": job.get("status"),
+        "stage": job.get("stage"),
+        "stage_label": job.get("stage_label"),
+        "progress": job.get("progress"),
+        "video_profile": job.get("video_profile", FF_VIDEO_PROFILE),
         "error": job.get("error"),
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
@@ -487,7 +574,7 @@ async def cancel_swap_job(job_id: str):
         process = JOB_PROCESSES.get(job_id)
     if process is not None:
         _terminate_process(process)
-    _set_job(job_id, status="cancelled", error="Job cancelled by client", updated_at=time.time())
+    _set_job(job_id, status="cancelled", stage="cancelled", stage_label=_STAGE_LABELS["cancelled"], error="Job cancelled by client", updated_at=time.time())
     return {"job_id": job_id, "status": "cancelled"}
 
 
