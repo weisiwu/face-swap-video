@@ -110,7 +110,13 @@ App 前端不需要知道底层从本机 FaceFusion 变成 FC GPU。
 
 ### 5.3 ACR
 
-需要用户提供或确认：
+GitHub 已创建独立仓库用于存放 ACR / FC GPU 容器部署资产：
+
+```text
+https://github.com/weisiwu/facefusion-fc-gpu-acr
+```
+
+需要用户提供或确认阿里云 ACR 侧信息：
 
 - ACR 实例类型：个人版/企业版均可，先以能被 FC 拉取为准；
 - 命名空间，例如 `baoganai`；
