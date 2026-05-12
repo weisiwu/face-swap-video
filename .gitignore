@@ -48,6 +48,7 @@ app/build/app/outputs/flutter-apk/face-swap-video-*.apk
 # ── Env / secrets ──
 .env
 *.env.local
+.docker-acr/
 
 # ── Local agent/MCP config ──
 .claude/
