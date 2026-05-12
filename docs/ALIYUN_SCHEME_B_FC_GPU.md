@@ -131,7 +131,15 @@ ALIYUN_ACR_REGISTRY=registry.cn-shanghai.aliyuncs.com
 ALIYUN_ACR_NAMESPACE=baoganai
 ALIYUN_ACR_REPOSITORY=facefusion-fc-gpu
 ALIYUN_ACR_USERNAME=...
-ALIYUN_ACR_PASSWORD=...
+ALIYUN_ACR_PASSWORD=***
+```
+
+当前用户已确认：
+
+```bash
+ALIYUN_ACR_REGISTRY=registry.cn-shanghai.aliyuncs.com
+ALIYUN_ACR_NAMESPACE=baoganai
+ALIYUN_ACR_REPOSITORY=facefusion-fc-gpu
 ```
 
 ### 5.4 OSS
@@ -147,10 +155,14 @@ ALIYUN_ACR_PASSWORD=...
 建议环境变量：
 
 ```bash
-ALIYUN_OSS_BUCKET=...
-ALIYUN_OSS_ENDPOINT=oss-cn-shanghai.aliyuncs.com
-ALIYUN_REGION_ID=cn-shanghai
+ALIYUN_OSS_BUCKET=baoganai-image-base
+ALIYUN_OSS_ENDPOINT=oss-cn-beijing.aliyuncs.com
+ALIYUN_REGION_ID=cn-beijing
 ```
+
+当前用户已确认以上 OSS 配置。
+
+注意：当前 OSS/目标地域是 `cn-beijing`，ACR 是 `cn-shanghai`。第一阶段可以先尝试，但建议确认 FC 在 `cn-beijing` 是否能稳定拉取上海 ACR 镜像；若遇到跨区拉取限制或冷启动慢，优先把 ACR 也建到 `cn-beijing`。
 
 ### 5.5 主账号凭证 / 权限
 

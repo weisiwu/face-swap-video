@@ -61,6 +61,7 @@ class PreflightReport:
             "required_env_summary": safe_env_summary(self.env),
             "commands": self.commands,
             "missing_commands": self.missing_commands,
+            "warnings": config_warnings(self.env),
             "no_sls_required": self.no_sls_required,
             "frontend_unchanged_required": self.frontend_unchanged_required,
             "account_mode": self.env.get("ALIYUN_ACCOUNT_MODE") or "main_account_confirmed_by_user",
@@ -80,6 +81,36 @@ def safe_env_summary(env: Mapping[str, str]) -> dict[str, str]:
         else:
             summary[key] = value
     return summary
+
+
+def _region_from_oss_endpoint(endpoint: str) -> str:
+    # oss-cn-beijing.aliyuncs.com -> cn-beijing
+    prefix = endpoint.split(".")[0]
+    if prefix.startswith("oss-"):
+        return prefix.removeprefix("oss-")
+    return ""
+
+
+def _region_from_acr_registry(registry: str) -> str:
+    # registry.cn-shanghai.aliyuncs.com -> cn-shanghai
+    parts = registry.split(".")
+    if len(parts) > 2 and parts[0] == "registry":
+        return parts[1]
+    return ""
+
+
+def config_warnings(env: Mapping[str, str]) -> list[str]:
+    warnings: list[str] = []
+    region = env.get("ALIYUN_REGION_ID", "").strip()
+    oss_region = _region_from_oss_endpoint(env.get("ALIYUN_OSS_ENDPOINT", "").strip())
+    acr_region = _region_from_acr_registry(env.get("ALIYUN_ACR_REGISTRY", "").strip())
+    if region and oss_region and region != oss_region:
+        warnings.append(f"ALIYUN_REGION_ID={region} 与 OSS endpoint 地域 {oss_region} 不一致。")
+    if region and acr_region and region != acr_region:
+        warnings.append(
+            f"ALIYUN_REGION_ID={region} 与 ACR registry 地域 {acr_region} 不一致；建议 FC/OSS/ACR 同地域，否则可能增加镜像拉取延迟或遇到跨区拉取限制。"
+        )
+    return warnings
 
 
 def user_action_required(missing: list[str]) -> list[str]:

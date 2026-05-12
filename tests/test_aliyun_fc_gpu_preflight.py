@@ -54,3 +54,16 @@ def test_ready_when_required_env_and_commands_exist(monkeypatch):
     assert report.ready_for_deploy_scripts is True
     assert report.missing_required_env == []
     assert report.missing_commands == []
+
+
+def test_warns_when_acr_region_differs_from_target_region():
+    mod = load_module()
+    warnings = mod.config_warnings(
+        {
+            "ALIYUN_REGION_ID": "cn-beijing",
+            "ALIYUN_OSS_ENDPOINT": "oss-cn-beijing.aliyuncs.com",
+            "ALIYUN_ACR_REGISTRY": "registry.cn-shanghai.aliyuncs.com",
+        }
+    )
+
+    assert any("ACR registry 地域 cn-shanghai" in warning for warning in warnings)
